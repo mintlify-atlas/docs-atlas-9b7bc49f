@@ -1,7 +1,7 @@
 ---
-title: "Fetch and Stream OHLCV Candles with getCandles and watchCandles"
+title: "Fetch and Stream OHLCV Candles: getCandles, watchCandles"
 sidebarTitle: "Candles"
-description: "Use getCandles for one-shot OHLCV history and watchCandles to stream live bar updates. Supports deep history, date ranges, and custom chart types like Heikin Ashi."
+description: "Use getCandles for one-shot OHLCV history and watchCandles to stream live bar updates. Supports deep history, date ranges, and custom chart types."
 ---
 
 `getCandles` and `watchCandles` are the primary way to retrieve OHLCV (open, high, low, close, volume) candlestick data from TradingView. `getCandles` is a one-shot function that opens a connection, loads the requested bars oldest-first, then releases all resources before returning. `watchCandles` resolves once the initial history is loaded and then streams a fresh frozen snapshot on every subsequent bar update. Both functions support deep history spanning thousands of bars, date ranges, and alternative chart types like Heikin Ashi or Renko.

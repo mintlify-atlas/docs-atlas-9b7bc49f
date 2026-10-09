@@ -1,7 +1,7 @@
 ---
-title: "QuoteSession: Subscribe to Live Symbol Quotes"
+title: "QuoteSession: Real-Time Symbol Quote Subscriptions"
 sidebarTitle: "Quotes"
-description: "QuoteSession multiplexes live quote subscriptions over a single TradingViewClient connection. Subscribe to multiple symbols and receive real-time price, bid, ask, and volume updates."
+description: "QuoteSession multiplexes symbol quotes over one WebSocket. Subscribe to many symbols and receive live price, bid, ask, and volume updates from TradingView."
 ---
 
 A `QuoteSession` lets you subscribe to live quote data for multiple symbols over a single `TradingViewClient` connection. Unlike `ChartSession`, quote sessions do not load OHLCV bars — they stream the latest snapshot fields (price, bid, ask, volume, etc.) as they change. Create one by calling `client.createQuoteSession()`.

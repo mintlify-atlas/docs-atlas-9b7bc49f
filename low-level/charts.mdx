@@ -1,7 +1,7 @@
 ---
-title: "ChartSession: Bars, Studies, Replay, and Custom Chart Types"
+title: "ChartSession: OHLCV Candles, Studies, and Replay Mode"
 sidebarTitle: "Charts"
-description: "ChartSession manages a single chart on a TradingViewClient connection. Load candles with setMarket, add studies, use fetchMore for deep history, or enable replay mode."
+description: "ChartSession manages one chart on a TradingViewClient connection. Load OHLCV bars, attach indicators, fetch extended history, or walk through replay mode."
 ---
 
 A `ChartSession` represents one chart on a `TradingViewClient` connection. It maintains a series of OHLCV bars, any attached studies, and an optional replay session, all multiplexed over the same WebSocket. Create one by calling `client.createChart()` — you can have multiple chart sessions on a single client, each for a different symbol or timeframe.
@@ -104,7 +104,7 @@ Loads a symbol onto the chart. The first call creates the bar series; subsequent
 | `symbolLoaded` | `info: SymbolInfo` | The symbol was resolved; `chart.symbolInfo` is now populated. |
 | `update` | `changes: string[]` | Bars or study data changed. `changes` lists the keys that were updated: `'$prices'` for bar data and study IDs (e.g. `'st_Ab12'`) for study updates. |
 | `seriesLoading` | — | The server started loading bars for the current symbol. |
-| `seriesCompleted` | `info: SeriesCompletedInfo` | The requested bars finished loading. `info.dataCompleted` is `'end'` when no earlier history exists and `'limit'` when the account limit has been reached. `info.status` is `'streaming'` in live mode or `'replay'` in replay mode. |
+| `seriesCompleted` | `info: SeriesCompletedInfo` | The requested bars finished loading. `info.status` is `'streaming'` in live mode or `'replay'` in replay mode. `info.dataCompleted` is `'end'` when no earlier history exists and `'limit'` when the account limit is reached. `info.turnaround` is the request ID (`s1`, `s2`, …). `info.raw` contains the full server packet payload. |
 | `error` | `error: TradingViewError` | A chart-level error: `SYMBOL_ERROR`, `SERIES_ERROR`, or `CRITICAL_ERROR`. |
 
 Replay mode adds further events — see [Replay Mode](#replay-mode).

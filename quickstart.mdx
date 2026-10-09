@@ -1,5 +1,5 @@
 ---
-title: "Get Started with TradingView-API in 5 Minutes"
+title: "TradingView-API Quickstart: Candles, Quotes, Streams"
 sidebarTitle: "Quickstart"
 description: "Install @mathieuc/tradingview and fetch real OHLCV candles, live quotes, and indicator values with just a few lines of TypeScript or JavaScript."
 ---
@@ -140,11 +140,25 @@ Key details:
 </CardGroup>
 
 <Tip>
-  Store your TradingView credentials in a `.env` file (use `.env.sample` in the repo as a template) and load them with Node's built-in `--env-file` flag:
+  Store your TradingView credentials in a `.env` file and load them with Node's built-in `--env-file` flag. The repo ships an `.env.sample` with the expected variable names:
+
+  ```bash .env
+  SESSION=your_sessionid_value_here
+  SIGNATURE=your_sessionid_sign_value_here
+  ```
 
   ```bash
   node --env-file=.env my-script.mjs
   ```
 
-  Then read them in code with `process.env.TV_SESSION` and `process.env.TV_SIGNATURE`. Never commit credential values to source control.
+  Then read the values in your code:
+
+  ```typescript
+  const credentials = {
+    session:   process.env.SESSION!,
+    signature: process.env.SIGNATURE!,
+  };
+  ```
+
+  Never commit credential values to source control. See [Authentication](/authentication) for full details.
 </Tip>

@@ -1,7 +1,7 @@
 ---
-title: "Search Markets, Indicators, and Get Technical Analysis Ratings"
+title: "Search Markets and Indicators, Get Technical Analysis"
 sidebarTitle: "Search"
-description: "Use searchMarkets, searchIndicators, and getTechnicalAnalysis to find symbols, discover Pine indicators, and retrieve multi-timeframe technical analysis ratings."
+description: "Use searchMarkets, searchIndicators, and getTechnicalAnalysis to find symbols, discover Pine indicators, and get multi-timeframe ratings."
 ---
 
 Three HTTP helper functions make it easy to discover symbols, find indicator IDs, and check technical ratings — all without opening a WebSocket connection. `searchMarkets` finds exchange-qualified symbols for use across the Data API. `searchIndicators` returns IDs for built-in and community Pine indicators. `getTechnicalAnalysis` returns TradingView's multi-timeframe oscillator and moving-average ratings for any symbol.
@@ -35,7 +35,7 @@ console.log(markets.slice(0, 5).map((m) => `${m.id} (${m.description})`));
 </ParamField>
 
 <ParamField query="options.type" type="string">
-  Filter by market type. Accepted values: `'stock'`, `'crypto'`, `'forex'`, `'futures'`, `'index'`, `'cfd'`, `'economic'`, `'bond'`, `'fund'`, `'common_stock'`.
+  Filter by market type. Accepted values: `'stock'`, `'crypto'`, `'forex'`, `'futures'`, `'index'`, `'cfd'`, `'economic'`, `'bond'`, `'fund'`. Other type strings are passed through as-is.
 </ParamField>
 
 <ParamField query="options.exchange" type="string">
@@ -148,9 +148,9 @@ const results = await searchIndicators('RSI');
 for (const indicator of results.slice(0, 5)) {
   console.log(`${indicator.id} — ${indicator.name} [${indicator.access}]`);
 }
-// STD;RSI — Relative Strength Index [open]
-// STD;Stochastic_RSI — Stochastic RSI [open]
-// PUB;xxxx — Custom RSI Divergence [open]
+// STD;RSI — Relative Strength Index [closed_source]
+// STD;Stochastic_RSI — Stochastic RSI [closed_source]
+// PUB;xxxx — Custom RSI Divergence [open_source]
 ```
 
 ### Return type: IndicatorSearchResult[]
@@ -167,24 +167,24 @@ for (const indicator of results.slice(0, 5)) {
   Display name of the indicator.
 </ResponseField>
 
-<ResponseField name="author" type="string">
-  Author username.
+<ResponseField name="author" type="{ id: number; username: string }">
+  Author information. Built-in indicators use `username: '@TRADINGVIEW@'` and `id: -1`.
 </ResponseField>
 
 <ResponseField name="image" type="string">
-  URL of the indicator's preview image.
+  Chart image ID. Full URL: `https://www.tradingview.com/i/<image>`. Empty string for built-ins.
 </ResponseField>
 
 <ResponseField name="source" type="string">
-  Source type (`'Script@tv-scripting-101!'` for Pine scripts, etc.).
+  Pine source code when the indicator is public. Empty string for built-ins and closed-source scripts.
 </ResponseField>
 
 <ResponseField name="type" type="string">
-  Indicator category, e.g. `'study'` or `'strategy'`.
+  Indicator category: `'study'` or `'strategy'`.
 </ResponseField>
 
 <ResponseField name="access" type="string">
-  Access level: `'open'` (free), `'closed'` (invite-only), or `'paid'`.
+  Access level: `'open_source'`, `'closed_source'`, `'invite_only'`, `'private'`, or `'other'`.
 </ResponseField>
 
 ### Using search results with getIndicatorData
@@ -213,7 +213,12 @@ console.log('RSI values (last 3):', data.values.slice(-3));
 ```
 
 <Note>
-  Built-in indicator metadata is cached. If built-in indicators seem stale after a TradingView update, call `clearIndicatorCache()` to clear the local cache and force a refresh on the next request.
+  Built-in indicator metadata is cached in memory. If built-in indicators seem stale after a TradingView update, call `clearIndicatorCache()` — exported from `@mathieuc/tradingview` — to clear the cache and force a refresh on the next `searchIndicators` call.
+
+  ```typescript
+  import { clearIndicatorCache } from '@mathieuc/tradingview';
+  clearIndicatorCache();
+  ```
 </Note>
 
 ---

@@ -1,7 +1,7 @@
 ---
 title: "Authenticate with Your TradingView Session Cookies"
 sidebarTitle: "Authentication"
-description: "Pass your TradingView sessionid and sessionid_sign cookies as credentials to access Pine scripts, private indicators, extended history, and account watchlists."
+description: "Use your TradingView sessionid and sessionid_sign cookies to access Pine scripts, private indicators, extended intraday history, and account watchlists."
 ---
 
 The library authenticates using your TradingView **session cookies**, not an API key. When you log in to TradingView in a browser, two cookies are set — `sessionid` and `sessionid_sign` — and you can paste those values into your environment variables to give the library access to everything your TradingView account can see. Anonymous access is sufficient for candles, built-in studies, quotes, and the screener, but Pine script indicators, private indicators, extended intraday history, and account watchlists all require valid credentials.
@@ -26,8 +26,8 @@ Both values are long strings of letters and numbers. You need both for full auth
 Create a `.env` file in your project root (and add it to `.gitignore`):
 
 ```bash .env
-TV_SESSION=your_sessionid_value_here
-TV_SIGNATURE=your_sessionid_sign_value_here
+SESSION=your_sessionid_value_here
+SIGNATURE=your_sessionid_sign_value_here
 ```
 
 Load the file when you run your script with Node's built-in `--env-file` flag:
@@ -39,8 +39,8 @@ node --env-file=.env my-script.mjs
 Then read the values at runtime:
 
 ```typescript
-const session   = process.env.TV_SESSION!;
-const signature = process.env.TV_SIGNATURE!;
+const session   = process.env.SESSION!;
+const signature = process.env.SIGNATURE!;
 ```
 
 ## Passing credentials to the Data API
@@ -51,8 +51,8 @@ Every WebSocket data function (`getCandles`, `watchCandles`, `getIndicatorData`,
 import { getCandles, getIndicatorData, watchCandles } from '@mathieuc/tradingview/data';
 
 const credentials = {
-  session:   process.env.TV_SESSION!,
-  signature: process.env.TV_SIGNATURE!,
+  session:   process.env.SESSION!,
+  signature: process.env.SIGNATURE!,
 };
 
 // Extended intraday history (requires account)
@@ -90,8 +90,8 @@ When using `TradingViewClient` directly, pass `credentials` in the constructor o
 import { TradingViewClient, getIndicator } from '@mathieuc/tradingview';
 
 const credentials = {
-  session:   process.env.TV_SESSION!,
-  signature: process.env.TV_SIGNATURE!,
+  session:   process.env.SESSION!,
+  signature: process.env.SIGNATURE!,
 };
 
 const client = new TradingViewClient({ credentials });
@@ -119,7 +119,7 @@ const client = new TradingViewClient({
 });
 ```
 
-## Programmatic login (`loginUser`)
+## Programmatic login
 
 If you prefer to authenticate with a username and password rather than copying cookies manually, use `loginUser`. It POSTs your credentials to TradingView's sign-in endpoint and returns a `User` object that includes the `session` and `signature` cookies.
 
@@ -137,8 +137,8 @@ console.log('session:  ', user.session);
 console.log('signature:', user.signature);
 
 // Store these values in your .env and use them from now on:
-// TV_SESSION=<user.session>
-// TV_SIGNATURE=<user.signature>
+// SESSION=<user.session>
+// SIGNATURE=<user.signature>
 ```
 
 The returned `User` object also contains `authToken` (the WebSocket auth token), `privateChannel`, `sessionHash`, and profile fields (`firstName`, `lastName`, `reputation`, `followers`, `following`).
@@ -146,6 +146,25 @@ The returned `User` object also contains `authToken` (the WebSocket auth token),
 <Warning>
   `loginUser` does **not** support accounts protected by two-factor authentication (2FA) or CAPTCHA challenges. If your account has 2FA enabled, copy the cookies from your browser instead (see [Getting your credentials](#getting-your-credentials) above).
 </Warning>
+
+### Verifying existing cookies (`getUser`)
+
+If you already have `session` and `signature` values (from the browser or a stored `.env`) and want to verify them and retrieve the WebSocket `authToken`, use `getUser`. It fetches a TradingView page with your cookies and parses the embedded account data.
+
+```typescript
+import { getUser } from '@mathieuc/tradingview';
+
+const credentials = {
+  session:   process.env.SESSION!,
+  signature: process.env.SIGNATURE,   // optional but recommended
+};
+
+const user = await getUser(credentials);
+console.log('Verified as', user.username);
+console.log('authToken:', user.authToken); // Use with TradingViewClient({ authToken })
+```
+
+`getUser` accepts an optional second argument `options` (`GetUserOptions`) with `location` (the URL to fetch, default `https://www.tradingview.com/chart/`) and `maxRedirects` (default 5). It throws `TradingViewError('AUTH_ERROR', ...)` if the cookies are wrong or expired.
 
 ## What requires an account?
 

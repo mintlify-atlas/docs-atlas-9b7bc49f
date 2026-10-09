@@ -1,7 +1,7 @@
 ---
-title: "Custom Transports, Proxies, and Protocol Helpers"
+title: "Transports, Proxies, and Protocol Wire-Format Helpers"
 sidebarTitle: "Transport"
-description: "Configure HTTP and WebSocket proxies with createProxy, implement a custom TransportFactory for testing or alternate runtimes, and use the protocol module for wire-format debugging."
+description: "Route traffic through an HTTP or SOCKS proxy with createProxy, implement a custom TransportFactory, and use protocol helpers for wire-format debugging."
 ---
 
 The library's default WebSocket transport is built on the [`ws`](https://github.com/websockets/ws) npm package, which works in both Node.js and Bun. You can replace it entirely — or route it through a proxy — without changing any other part of your code. The same `transport` and `fetch` options are accepted by `TradingViewClient`, the data API `clientOptions`, and the standalone HTTP functions.
@@ -260,12 +260,13 @@ The client handles heartbeats automatically. You only need these helpers for low
 import { TradingViewClient, protocol } from '@mathieuc/tradingview';
 
 const client = new TradingViewClient({
-  debug(prefix, raw) {
-    if (prefix === 'send') {
-      const [frame] = protocol.decodeFrames(raw);
+  debug: (...args: unknown[]) => {
+    const [label, payload] = args;
+    if (label === 'send' && typeof payload === 'string') {
+      const [frame] = protocol.decodeFrames(payload);
       if (frame.type === 'packet') console.log('→', frame.packet.m, frame.packet.p);
-    } else if (prefix === 'packet') {
-      console.log('←', (raw as any).m, (raw as any).p);
+    } else if (label === 'packet') {
+      console.log('←', (payload as any).m, (payload as any).p);
     }
   },
 });

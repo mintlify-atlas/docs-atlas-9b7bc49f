@@ -37,7 +37,7 @@ for (const [symbol, quote] of Object.entries(quotes)) {
   *(For `getQuotes` and `watchQuotes`)* Non-empty array of exchange-qualified symbols. Duplicates are ignored.
 </ParamField>
 
-<ParamField body="fields" type="string | string[]" default="'all'">
+<ParamField body="fields" type="'all' | 'price' | QuoteField[]" default="'all'">
   Controls which quote fields are requested from TradingView. Use `'all'` to receive every available field, `'price'` for `lp` only, or an array of specific field names such as `['lp', 'bid', 'ask', 'volume']`.
 </ParamField>
 

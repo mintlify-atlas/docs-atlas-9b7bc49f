@@ -1,7 +1,7 @@
 ---
-title: "Studies: Pine Indicators, Built-In Studies, and Strategy Reports"
+title: "Studies: Pine and Built-In Indicators on a ChartSession"
 sidebarTitle: "Studies"
-description: "Add Pine or built-in studies to a ChartSession with createStudy. Access plot values, graphics, and strategy reports. Manage inputs and swap indicators at runtime."
+description: "Attach Pine or built-in indicators to a ChartSession with createStudy. Read plot values, graphics, and strategy reports. Swap indicators at runtime."
 ---
 
 Studies are indicators that run on a `ChartSession`. Each study is attached to the chart's bar series and receives updated plot values whenever new bars arrive. Create a study by passing an indicator definition to `chart.createStudy(indicator)`. The indicator can be a `PineIndicator` loaded from TradingView (built-in, community, or private Pine scripts) or a `BuiltInIndicator` for native TradingView studies like Volume and Volume Profile.

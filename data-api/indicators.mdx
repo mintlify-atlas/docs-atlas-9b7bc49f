@@ -1,7 +1,7 @@
 ---
-title: "Run Pine Indicators and Strategy Backtests with getIndicatorData"
+title: "Run Pine Indicators and Strategy Backtests: getIndicatorData"
 sidebarTitle: "Indicators"
-description: "Use getIndicatorData to compute built-in and Pine indicator values, drawings, and strategy performance reports against any TradingView symbol and timeframe."
+description: "Use getIndicatorData to compute built-in and Pine indicator values, drawings, and strategy reports against any TradingView symbol and timeframe."
 ---
 
 `getIndicatorData` runs any TradingView indicator or Pine strategy against a symbol and timeframe, returning computed plot values, drawing graphics, and a full strategy backtest report. It supports built-in studies (no account required), community and private Pine scripts (account required), and accepts both indicator IDs and indicator instances. `watchIndicator` streams the same result in real time on every study update.
@@ -131,8 +131,8 @@ const results = await searchIndicators('RSI');
 for (const indicator of results.slice(0, 5)) {
   console.log(indicator.id, '-', indicator.name, `[${indicator.access}]`);
 }
-// STD;RSI - Relative Strength Index [open]
-// PUB;xxxx - Custom RSI by some_user [open]
+// STD;RSI - Relative Strength Index [closed_source]
+// PUB;xxxx - Custom RSI by some_user [open_source]
 ```
 
 Pass the `id` (and optionally `version`) from a search result directly to `getIndicatorData`.

@@ -1,7 +1,7 @@
 ---
-title: "Migrate from TradingView-API v3 to v4"
+title: "TradingView-API: Complete v3 to v4 Migration Guide"
 sidebarTitle: "v3 → v4 Migration"
-description: "Version 4 is a complete TypeScript rewrite of TradingView-API with no compatibility layer. This guide translates every v3 pattern to its v4 equivalent."
+description: "Version 4 is a full TypeScript rewrite of TradingView-API with no compatibility layer. Translate every v3 client, chart, study, and quote pattern to v4."
 ---
 
 Version 4 is a complete TypeScript rewrite of `@mathieuc/tradingview` — there is no compatibility shim and no gradual upgrade path. Every v3 capability is preserved under a more consistent, fully typed API. The changes follow a clear set of principles: events replace custom callback methods, options use camelCase throughout, data is returned oldest-first, and errors are structured `TradingViewError` objects instead of raw string lists. This guide shows the direct translation for every area of the API.

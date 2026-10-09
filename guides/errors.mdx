@@ -1,7 +1,7 @@
 ---
 title: "TradingViewError Codes: Handling Every Failure Mode"
 sidebarTitle: "Error Handling"
-description: "Every failure in TradingView-API throws a TradingViewError with a machine-readable code. Learn what each code means and how to handle errors in one-shot functions and watchers."
+description: "Every failure in TradingView-API throws a TradingViewError with a machine-readable code. Learn what each of the 18 codes means and how to handle them."
 ---
 
 Every error produced by this library is a `TradingViewError`. It extends the standard `Error` class with two additional fields: a machine-readable `code` string that identifies the category of failure, and a `details` property that holds the raw server payload when one is available. Because every error shares the same shape, you can write a single catch block that branches on `error.code` rather than pattern-matching message strings.
@@ -10,6 +10,7 @@ Every error produced by this library is a `TradingViewError`. It extends the sta
 
 ```typescript
 class TradingViewError extends Error {
+  readonly name = 'TradingViewError';
   readonly code: TradingViewErrorCode;
   readonly details: unknown; // raw server payload when available
 }
@@ -47,7 +48,8 @@ Every `TradingViewErrorCode` value, its origin, and what it means in practice:
 One-shot functions like `getCandles`, `getQuote`, and `getIndicatorData` return a promise that rejects with a `TradingViewError` on failure. Wrap them in a `try/catch` and switch on `error.code`:
 
 ```javascript
-import { getCandles, TradingViewError } from '@mathieuc/tradingview';
+import { getCandles } from '@mathieuc/tradingview/data';
+import { TradingViewError } from '@mathieuc/tradingview';
 
 try {
   const candles = await getCandles({ symbol: 'BINANCE:BTCUSDT', timeframe: 'D', count: 100 });

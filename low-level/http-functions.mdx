@@ -1,7 +1,7 @@
 ---
-title: "HTTP Functions: Account, Layouts, Indicators, and Pine Permissions"
+title: "HTTP Functions: Account, Layouts, Indicators, and Screener"
 sidebarTitle: "HTTP Functions"
-description: "Low-level HTTP helpers for account management, layout drawings, Pine indicator fetching, and managing invite-only script permissions in TradingView-API."
+description: "HTTP helpers for TradingView-API: sign in, fetch layout drawings, load Pine indicators, manage invite-only script access, and screen or search markets."
 ---
 
 The library exports a collection of HTTP helper functions that call TradingView REST and `pine-facade` endpoints directly. All functions accept a common options bag containing `{ fetch?, signal?, headers? }`, where `fetch` is a drop-in `fetch` replacement (useful for proxies or testing) and `signal` is an `AbortSignal`. Functions that access account data also accept `credentials: { session, signature }`.
@@ -149,13 +149,16 @@ import { parseIndicatorDefinition } from '@mathieuc/tradingview';
 const indicator = parseIndicatorDefinition(raw.result, 'STD;RSI', 'last');
 ```
 
-## Search and Analysis Functions
+## Search, Screener, and Watchlist Functions
 
 | Function | Description |
 |---|---|
 | `searchMarkets(text, options?)` | Symbol search via the v3 endpoint. Options: `type`, `exchange`, `country`, `sector`, `offset`. |
 | `searchIndicators(query, options?)` | Searches built-in (memory-cached) and community indicators. |
 | `getTechnicalAnalysis(symbol)` | Technical ratings for 1m to 1M periods. Returns `null` if unavailable. |
+| `getScreener(query, options?)` | Runs a screener query against a TradingView scanner universe. `query` specifies `market`, `columns`, `filter`, `sort`, and `range`. Returns `{ totalCount, rows }`. |
+| `getWatchlists(options)` | Reads all watchlists belonging to the authenticated account. Requires `credentials`. Returns an array of `{ id, name, symbols }` objects. |
+| `getHotlist(query, options?)` | Returns a top-`N` list for a given `kind`: `'gainers'`, `'losers'`, `'mostActive'`, or `'volumeGainers'`. Accepts the same screener options minus `columns` and `sort`. |
 
 These functions are also covered in [Data API: Search](/data-api/search).
 
