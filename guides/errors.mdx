@@ -1,0 +1,212 @@
+---
+title: "TradingViewError Codes: Handling Every Failure Mode"
+sidebarTitle: "Error Handling"
+description: "Every failure in TradingView-API throws a TradingViewError with a machine-readable code. Learn what each code means and how to handle errors in one-shot functions and watchers."
+---
+
+Every error produced by this library is a `TradingViewError`. It extends the standard `Error` class with two additional fields: a machine-readable `code` string that identifies the category of failure, and a `details` property that holds the raw server payload when one is available. Because every error shares the same shape, you can write a single catch block that branches on `error.code` rather than pattern-matching message strings.
+
+## Error Class
+
+```typescript
+class TradingViewError extends Error {
+  readonly code: TradingViewErrorCode;
+  readonly details: unknown; // raw server payload when available
+}
+```
+
+The `code` is one of the `TradingViewErrorCode` string literals documented below. The `message` is a human-readable description suitable for logging. The `details` field carries the raw server response object for protocol-level errors, or `undefined` for errors detected client-side.
+
+## Error Code Reference
+
+Every `TradingViewErrorCode` value, its origin, and what it means in practice:
+
+| Code | Description |
+|---|---|
+| `PROTOCOL_ERROR` | The server rejected a WebSocket packet and closed the connection. Usually indicates a library bug or an unexpected server-side change. |
+| `CONNECTION_ERROR` | The WebSocket could not be opened, or the underlying TCP connection failed. Check network access and the `server`/`location` option. |
+| `DISCONNECTED` | The WebSocket closed while an operation was still waiting for data. Happens during network drops or server-side disconnections. |
+| `AUTH_ERROR` | Credentials were rejected or the account could not be loaded. Verify that your `session` and `signature` cookies are current. |
+| `SYMBOL_ERROR` | The symbol could not be resolved (`symbol_error`). Check the exchange prefix and ticker spelling. |
+| `SERIES_ERROR` | The bar series could not be loaded (`series_error`). Common causes: insufficient plan for the requested timeframe, or chart type requires an account. |
+| `CRITICAL_ERROR` | The server rejected a chart or replay command (`critical_error`). Often means a replay timestamp is outside the available range. |
+| `STUDY_ERROR` | An indicator failed on the server (`study_error`). Pine scripts with invalid inputs or insufficient permissions produce this. |
+| `QUOTE_ERROR` | A quote subscription returned an error status for a symbol. The symbol may be delisted or unsupported by the quote endpoint. |
+| `PARSE_ERROR` | A strategy report or compressed server payload could not be decoded. May indicate a protocol version mismatch. |
+| `INVALID_STATE` | A method was called in a state where it cannot work (e.g., `setTimeframe` before `setMarket`, or replay methods outside replay mode). |
+| `INVALID_ARGUMENT` | An argument is invalid and was rejected before connecting — for example, an unrecognised timeframe string. |
+| `HTTP_ERROR` | An HTTP endpoint returned an unexpected status code or an unrecognised response body. |
+| `NOT_FOUND` | The requested resource does not exist or is not accessible to the current account (indicators, drawings, layouts). |
+| `NO_DATA` | The server responded but returned no usable bars or data points. Common when requesting a range with no trading activity. |
+| `TIMEOUT` | The operation did not complete within the configured `timeoutMs`. Raise the timeout for deep history requests or slow connections. |
+| `ABORTED` | The operation was cancelled via an `AbortSignal`. Thrown when the signal fires before the operation completes. |
+| `CALLBACK_ERROR` | A user-supplied `onData` or `onError` callback threw an exception. The watcher stream remains active — only the callback invocation is skipped. |
+
+## Handling Errors in One-Shot Functions
+
+One-shot functions like `getCandles`, `getQuote`, and `getIndicatorData` return a promise that rejects with a `TradingViewError` on failure. Wrap them in a `try/catch` and switch on `error.code`:
+
+```javascript
+import { getCandles, TradingViewError } from '@mathieuc/tradingview';
+
+try {
+  const candles = await getCandles({ symbol: 'BINANCE:BTCUSDT', timeframe: 'D', count: 100 });
+  console.log('Last close:', candles.at(-1).close);
+} catch (error) {
+  if (!(error instanceof TradingViewError)) throw error; // rethrow unexpected errors
+
+  switch (error.code) {
+    case 'SYMBOL_ERROR':
+      console.error('Unknown symbol — check the exchange prefix and ticker.');
+      break;
+    case 'AUTH_ERROR':
+      console.error('Credentials expired — refresh SESSION and SIGNATURE.');
+      break;
+    case 'SERIES_ERROR':
+      console.error('Series load failed — check plan or timeframe permissions.');
+      break;
+    case 'TIMEOUT':
+      console.error('Request timed out — try raising timeoutMs.');
+      break;
+    case 'ABORTED':
+      console.log('Request was cancelled.');
+      break;
+    default:
+      console.error(`Unexpected error [${error.code}]:`, error.message, error.details);
+  }
+}
+```
+
+## Handling Errors in Watchers
+
+Watcher functions like `watchCandles` and `watchQuotes` accept an `onError` callback instead of rejecting the returned promise. The watcher stream stays open after `onError` is called (unless the underlying connection is lost), so you can log and continue without restarting.
+
+```javascript
+import { watchCandles } from '@mathieuc/tradingview/data';
+
+const watcher = await watchCandles(
+  { symbol: 'BINANCE:BTCUSDT', timeframe: '1', count: 10 },
+  {
+    onData: (candles) => {
+      const last = candles.at(-1);
+      console.log(new Date(last.time * 1000).toISOString(), 'close', last.close);
+    },
+    onError: (error) => {
+      // The stream remains active; only this update was skipped.
+      console.error(`[${error.code}] ${error.message}`);
+    },
+  },
+);
+
+setTimeout(() => watcher.stop(), 60_000);
+await watcher.closed;
+```
+
+<Note>
+  When your own `onData` callback throws, the library catches the exception and calls `onError` with a `CALLBACK_ERROR`. The watcher keeps running. This prevents a single bad update from killing a long-lived stream.
+</Note>
+
+## Cancellation with AbortSignal
+
+Pass an `AbortSignal` to any one-shot function to cancel it from outside. The promise rejects with `ABORTED` when the signal fires.
+
+```javascript
+import { getCandles } from '@mathieuc/tradingview/data';
+
+const controller = new AbortController();
+
+// Cancel after 5 seconds
+setTimeout(() => controller.abort(), 5_000);
+
+try {
+  const candles = await getCandles({
+    symbol: 'BINANCE:BTCUSDT',
+    timeframe: 'D',
+    count: 500,
+    signal: controller.signal,
+  });
+  console.log(candles.length, 'candles');
+} catch (error) {
+  if (error.code === 'ABORTED') {
+    console.log('Request was cancelled before completing.');
+  } else {
+    throw error;
+  }
+}
+```
+
+You can also use the static helper `AbortSignal.timeout(ms)` to set a hard deadline:
+
+```javascript
+const candles = await getCandles({
+  symbol: 'BINANCE:BTCUSDT',
+  timeframe: 'D',
+  count: 500,
+  signal: AbortSignal.timeout(10_000), // abort after 10 s
+});
+```
+
+## Timeout Tuning
+
+The default `timeoutMs` is set for typical requests. When fetching very deep history or running slow indicator computations, you may need to raise it:
+
+```javascript
+import { getCandles } from '@mathieuc/tradingview/data';
+
+// Fetch 5 years of hourly bars — allow up to 60 seconds
+const candles = await getCandles({
+  symbol: 'NASDAQ:AAPL',
+  timeframe: '60',
+  from: new Date('2019-01-01'),
+  timeoutMs: 60_000,
+});
+```
+
+For one-shot functions, `timeoutMs` counts from the moment the function is called until the data is fully received. For the low-level `TradingViewClient`, `connectTimeoutMs` controls only the initial WebSocket handshake.
+
+## The `toTradingViewError` Normalizer
+
+When integrating with code that throws arbitrary values, use `toTradingViewError` to normalize any thrown value into a `TradingViewError`:
+
+```typescript
+import { toTradingViewError, TradingViewError } from '@mathieuc/tradingview';
+
+function handleAny(thrown: unknown): TradingViewError {
+  return toTradingViewError(thrown, 'CONNECTION_ERROR');
+  // - If thrown is already a TradingViewError, it is returned as-is.
+  // - If thrown is a native AbortError, it becomes ABORTED.
+  // - Any other Error is wrapped with the fallback code.
+  // - Non-Error values are converted to string and wrapped.
+}
+```
+
+The second argument is the fallback code used when the original error has no TradingView category. It defaults to `CONNECTION_ERROR`.
+
+## Frequently Asked Questions
+
+<Accordion title="Why do I get STUDY_ERROR?">
+  `STUDY_ERROR` means the Pine script failed to execute on the TradingView server. The two most common causes are:
+
+  1. **Invalid inputs** — an indicator input value is out of range (e.g., a negative factor). Check the error `message` for the specific argument name.
+  2. **Missing credentials** — Pine scripts tagged `STD;`, `PUB;`, or `USER;` require an authenticated session. Set `SESSION` and `SIGNATURE` in your environment and pass them as `credentials`.
+
+  Built-in studies (e.g., `Volume@tv-basicstudies-241`) do not require credentials.
+</Accordion>
+
+<Accordion title="Why do I get NO_DATA?">
+  `NO_DATA` means the server responded successfully but returned zero usable bars or data points. Typical causes:
+
+  - The requested date range contains no trading activity for that symbol (e.g., a weekend range for a stock).
+  - You are an anonymous user requesting more bars than the free tier allows for that symbol or timeframe.
+  - The `from` / `to` window is in the future or before the symbol's listing date.
+</Accordion>
+
+<Accordion title="Why do I get TIMEOUT?">
+  The operation did not complete within `timeoutMs`. This is most common when:
+
+  - Fetching a large date range that requires many round-trips of incremental history loading.
+  - Running a complex Pine indicator over many bars.
+  - Connecting on a slow or high-latency network.
+
+  Raise `timeoutMs` for the specific call that times out. For strategy reports, `30_000` ms is a reasonable starting point; deep history may need `60_000` ms or more.
+</Accordion>

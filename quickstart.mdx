@@ -1,47 +1,150 @@
 ---
-title: "Quickstart"
-description: "Begin with a guide on the fastest path to a successful outcome"
+title: "Get Started with TradingView-API in 5 Minutes"
+sidebarTitle: "Quickstart"
+description: "Install @mathieuc/tradingview and fetch real OHLCV candles, live quotes, and indicator values with just a few lines of TypeScript or JavaScript."
 ---
 
-Describe how someone begins using your product. What is the first thing they need to do? Are there any prerequisites?
-
-A quickstart should take someone from zero to using your product. They'll get a quick win and a sense of what they can accomplish.
-
-## Prerequisites
-
-Before you begin, you must have:
-
-- Requirement one (for example, Node.js 18+, a free account, an API key)
-- Requirement two (for example, a compatible device, a compatible browser, a compatible operating system)
-
-## Get started
+This quickstart walks you through the most common tasks — fetching historical candles, reading a live quote, and watching a live price stream — using the high-level Data API. All examples use Binance BTC/USDT and work **completely anonymously**: no TradingView account is required.
 
 <Steps>
-  <Step title="Install">
-    Describe how to install your product or sign up.
 
-    ```bash
-    npm install your-package
-    ```
-  </Step>
-  <Step title="Configure">
-    Describe any setup or configuration needed before first use.
+<Step title="Install">
 
-    ```bash
-    your-cli init
-    ```
-  </Step>
-  <Step title="Run it">
-    Show the first thing a user does to see it working.
+Install the package with your preferred package manager. Node.js ≥ 20 or Bun is required.
 
-    ```bash
-    your-cli start
-    ```
-  </Step>
+<CodeGroup>
+
+```bash npm
+npm install @mathieuc/tradingview
+```
+
+```bash yarn
+yarn add @mathieuc/tradingview
+```
+
+```bash pnpm
+pnpm add @mathieuc/tradingview
+```
+
+```bash bun
+bun add @mathieuc/tradingview
+```
+
+</CodeGroup>
+
+</Step>
+
+<Step title="Fetch candles">
+
+`getCandles` is a one-shot function: it opens a connection, waits for TradingView to return the complete bar history, then closes everything and resolves with the result. No teardown code needed.
+
+```typescript
+import { getCandles } from '@mathieuc/tradingview/data';
+
+const candles = await getCandles({
+  symbol: 'BINANCE:BTCUSDT',
+  timeframe: 'D',   // Daily bars. Use '60' for 1 h, '15' for 15 min, etc.
+  count: 40,        // Most recent 40 bars, oldest first.
+});
+
+console.log(candles.at(-1));
+// { time: 1748908800, open: 103241, high: 105819, low: 102889, close: 104976, volume: 18423.7 }
+```
+
+A few things to know about the result:
+
+- **`time`** is the bar **open** time in Unix **seconds** (not milliseconds).
+- The array is **oldest-first**: index `0` is the oldest bar, `at(-1)` is the latest.
+- Omit `count` to get the default 100 daily bars, or pass `from: new Date(...)` to load a date range.
+- Anonymous access is limited to roughly **7 000 one-minute bars**. Daily and weekly history is much longer without an account.
+
+</Step>
+
+<Step title="Get a live quote">
+
+`getQuote` returns the latest snapshot for a symbol in a single async call.
+
+```typescript
+import { getQuote } from '@mathieuc/tradingview/data';
+
+const quote = await getQuote('BINANCE:BTCUSDT');
+
+console.log(quote.lp);    // Last price
+console.log(quote.chp);   // Change percent (e.g. 1.45)
+console.log(quote.ch);    // Change in currency units
+console.log(quote.bid);   // Best bid
+console.log(quote.ask);   // Best ask
+console.log(quote.volume); // 24 h volume
+```
+
+A quote object contains all the fields TradingView sent: `lp`, `lp_time`, `ch`, `chp`, `bid`, `ask`, `volume`, `open_price`, `high_price`, `low_price`, `prev_close_price`, `description`, `currency_code`, and more.
+
+</Step>
+
+<Step title="Watch live candles">
+
+`watchCandles` resolves once the initial history is loaded, then keeps calling `onData` on every new tick or candle close. Call `watcher.stop()` to unsubscribe and clean up.
+
+```typescript
+import { watchCandles } from '@mathieuc/tradingview/data';
+
+const watcher = await watchCandles(
+  {
+    symbol: 'BINANCE:BTCUSDT',
+    timeframe: '1',   // 1-minute bars
+    count: 50,        // Keep the last 50 bars in each snapshot
+  },
+  {
+    onData(candles) {
+      const latest = candles.at(-1);
+      console.log(`[${new Date(latest!.time * 1000).toISOString()}] close: ${latest!.close}`);
+    },
+    onError(error) {
+      console.error('Stream error:', error.code, error.message);
+    },
+  },
+);
+
+// The promise above resolves once the initial snapshot has arrived.
+// Keep watching for 30 seconds, then stop.
+await new Promise((resolve) => setTimeout(resolve, 30_000));
+await watcher.stop(); // Idempotent — safe to call more than once
+```
+
+Key details:
+
+- Each `onData` call receives a **frozen array** of the `count` most recent bars, oldest first.
+- `watcher.latest` always holds the most recent snapshot.
+- `watcher.closed` is a `Promise` that resolves when the watcher stops (after `stop()`, a cancelled `signal`, or a fatal error).
+- There is **no automatic reconnection**. Start a new watcher if `closed` resolves due to a disconnection.
+
+</Step>
+
 </Steps>
 
-<Tip>
-  Give people a way to get help. This could be a link to a support page, a chat with a customer support agent, or a forum for your product.
+## What's next
 
-  Example: Need help? Reach out to us at [support@yourcompany.com](mailto:support@yourcompany.com).
+<CardGroup cols={2}>
+  <Card title="Data API Overview" icon="book-open" href="/data-api/overview">
+    Full reference for `getCandles`, `watchCandles`, `getQuote`, `getScreener`, and every other data function — including all options, error codes, and connection sharing.
+  </Card>
+  <Card title="Authentication" icon="key" href="/authentication">
+    Pass your TradingView session cookies to unlock Pine scripts, extended intraday history, and account watchlists.
+  </Card>
+  <Card title="Indicators & Strategies" icon="chart-line" href="/data-api/indicators">
+    Run RSI, Supertrend, custom Pine scripts, and full strategy backtests with `getIndicatorData` and `watchIndicator`.
+  </Card>
+  <Card title="Examples" icon="code" href="/guides/examples">
+    Runnable end-to-end examples for candles, quotes, indicators, strategy reports, screener, and login.
+  </Card>
+</CardGroup>
+
+<Tip>
+  Store your TradingView credentials in a `.env` file (use `.env.sample` in the repo as a template) and load them with Node's built-in `--env-file` flag:
+
+  ```bash
+  node --env-file=.env my-script.mjs
+  ```
+
+  Then read them in code with `process.env.TV_SESSION` and `process.env.TV_SIGNATURE`. Never commit credential values to source control.
 </Tip>

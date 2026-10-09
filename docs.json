@@ -1,72 +1,74 @@
 {
   "$schema": "https://mintlify.com/docs.json",
-  "theme": "mint",
-  "name": "Mintlify Starter Kit",
+  "name": "TradingView-API",
+  "theme": "luma",
   "colors": {
-    "primary": "#16A34A",
-    "light": "#07C983",
-    "dark": "#15803D"
+    "primary": "#848484",
+    "light": "#151515",
+    "dark": "#d8d8d8"
   },
-  "favicon": "/favicon.svg",
-  "navigation": {
-    "pages": [
-      {
-        "group": "Getting Started",
-        "pages": [
-          "index",
-          "quickstart"
-        ]
-      }
-    ],
-    "global": {
-      "anchors": [
-        {
-          "anchor": "Documentation",
-          "href": "https://mintlify.com/docs",
-          "icon": "book-open-cover"
-        },
-        {
-          "anchor": "Blog",
-          "href": "https://mintlify.com/blog",
-          "icon": "newspaper"
-        }
-      ]
-    }
-  },
+  "favicon": "https://media.brand.dev/2be02d9b-676a-4182-825b-846023665284.png",
   "logo": {
-    "light": "/logo/light.svg",
-    "dark": "/logo/dark.svg"
+    "light": "https://media.brand.dev/de96ded8-aa76-4225-b33f-2c2453885ae5.svg",
+    "dark": "https://media.brand.dev/de96ded8-aa76-4225-b33f-2c2453885ae5.svg"
   },
   "navbar": {
-    "links": [
-      {
-        "label": "Support",
-        "href": "mailto:support@mintlify.com"
-      }
-    ],
     "primary": {
-      "type": "button",
-      "label": "Dashboard",
-      "href": "https://app.mintlify.com"
+      "type": "github",
+      "href": "https://github.com/Mathieu2301/TradingView-API"
     }
-  },
-  "contextual": {
-    "options": [
-      "copy",
-      "view",
-      "chatgpt",
-      "claude",
-      "perplexity",
-      "mcp",
-      "cursor",
-      "vscode"
-    ]
   },
   "footer": {
     "socials": {
-      "x": "https://x.com/mintlify",
-      "github": "https://github.com/mintlify",
-      "linkedin": "https://linkedin.com/company/mintlify"
+      "github": "https://github.com/Mathieu2301/TradingView-API"
     }
+  },
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "authentication"
+            ]
+          },
+          {
+            "group": "Data API",
+            "pages": [
+              "data-api/overview",
+              "data-api/candles",
+              "data-api/quotes",
+              "data-api/indicators",
+              "data-api/screener",
+              "data-api/watchlists",
+              "data-api/search"
+            ]
+          },
+          {
+            "group": "Low-Level API",
+            "pages": [
+              "low-level/client",
+              "low-level/charts",
+              "low-level/studies",
+              "low-level/quotes",
+              "low-level/http-functions",
+              "low-level/transport"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/examples",
+              "guides/errors",
+              "guides/migration-v3-to-v4"
+            ]
+          }
+        ]
+      }
+    ]
   }
 }

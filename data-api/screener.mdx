@@ -1,0 +1,185 @@
+---
+title: "Scan Markets with getScreener: Filters, Columns, and Ranking"
+sidebarTitle: "Screener"
+description: "Use getScreener to run one-shot market scans with custom columns, filters, sorting, and pagination against any TradingView market universe."
+---
+
+`getScreener` performs a single HTTP scan against TradingView's scanner API — no WebSocket session or chart connection is required. Each call returns one page of matching symbols with their requested field values. Use `filter`, `sort`, and `range` to narrow and rank results, and repeat with different `range` values to paginate manually.
+
+Import from either entry point:
+
+```typescript
+import { getScreener } from '@mathieuc/tradingview/data';
+// or
+import { getScreener } from '@mathieuc/tradingview';
+```
+
+## getScreener
+
+```typescript
+import { getScreener } from '@mathieuc/tradingview/data';
+
+const page = await getScreener({
+  market: 'america',
+  columns: ['name', 'close', 'volume', 'Stoch.RSI.D'],
+  filter: [{ left: 'type', operation: 'equal', right: 'stock' }],
+  sort: { sortBy: 'volume', sortOrder: 'desc' },
+  range: [0, 20],
+});
+
+console.log(`Total matches: ${page.totalCount}`);
+console.table(page.rows.map(({ symbol, values }) => ({ symbol, ...values })));
+```
+
+### Query options
+
+<ParamField body="market" type="string" default="'global'">
+  Scanner universe to search. Common values: `'america'` (US equities), `'crypto'`, `'forex'`, `'global'`. The available universes are controlled by TradingView's scanner API and may change over time.
+</ParamField>
+
+<ParamField body="columns" type="string[]" required>
+  Non-empty array of unique scanner field names to retrieve. Examples: `'name'`, `'close'`, `'volume'`, `'change'`, `'relative_volume_10d_calc'`, `'Stoch.RSI.D'`, `'RSI'`. Column names, including optional timeframe suffixes, are defined by TradingView and are not a stable schema owned by this library.
+</ParamField>
+
+<ParamField body="filter" type="ScreenerFilter[]">
+  Array of filter objects. Each filter has:
+  - `left` — the field name to filter on
+  - `operation` — comparison operation (e.g. `'equal'`, `'greater'`, `'less'`, `'in_range'`)
+  - `right` — the comparison value
+
+  Example: `[{ left: 'type', operation: 'equal', right: 'stock' }]`
+</ParamField>
+
+<ParamField body="sort" type="object">
+  Sort the results by a field. Accepts `{ sortBy: string, sortOrder: 'asc' | 'desc' }`. Example: `{ sortBy: 'volume', sortOrder: 'desc' }`.
+</ParamField>
+
+<ParamField body="range" type="[number, number]" default="[0, 50]">
+  Zero-based, end-exclusive page range. `[0, 20]` returns the first 20 results. `[20, 40]` returns results 20–39. Rankings can change between requests — pages are not a transactionally consistent snapshot.
+</ParamField>
+
+<ParamField body="symbols" type="string[]">
+  Restrict the scan to an explicit list of exchange-qualified tickers, e.g. `['NASDAQ:AAPL', 'NASDAQ:MSFT']`. Useful for fetching screener columns for a known watchlist.
+</ParamField>
+
+### Response type: ScreenerResult
+
+<ResponseField name="totalCount" type="number">
+  Total number of symbols matching the query across all pages. Use this with `range` to implement manual pagination.
+</ResponseField>
+
+<ResponseField name="rows" type="ScreenerRow[]">
+  Array of matched symbols for the requested page.
+  <Expandable title="ScreenerRow fields">
+    <ResponseField name="symbol" type="string">
+      Exchange-qualified symbol (e.g. `'NASDAQ:AAPL'`).
+    </ResponseField>
+    <ResponseField name="values" type="Record<string, unknown>">
+      Object keyed by requested column names. Values retain their upstream types including `null`. Unknown fields do not become empty — an invalid column name will throw `HTTP_ERROR`.
+    </ResponseField>
+  </Expandable>
+</ResponseField>
+
+### Code examples
+
+<CodeGroup>
+
+```typescript America stocks by volume
+import { getScreener } from '@mathieuc/tradingview/data';
+
+const page = await getScreener({
+  market: 'america',
+  columns: ['name', 'close', 'volume', 'Stoch.RSI.D'],
+  filter: [{ left: 'type', operation: 'equal', right: 'stock' }],
+  sort: { sortBy: 'volume', sortOrder: 'desc' },
+  range: [0, 10],
+});
+
+console.log(`Showing ${page.rows.length} of ${page.totalCount} total results`);
+for (const { symbol, values } of page.rows) {
+  console.log(`${symbol}: close=${values.close}, volume=${values.volume}`);
+}
+```
+
+```typescript Restrict to explicit tickers
+import { getScreener } from '@mathieuc/tradingview/data';
+
+const page = await getScreener({
+  market: 'america',
+  columns: ['name', 'close', 'change', 'volume', 'RSI'],
+  symbols: ['NASDAQ:AAPL', 'NASDAQ:MSFT', 'NYSE:TSLA'],
+});
+
+for (const { symbol, values } of page.rows) {
+  console.log(`${symbol}: ${values.close} (RSI: ${values.RSI})`);
+}
+```
+
+```typescript Manual pagination
+import { getScreener } from '@mathieuc/tradingview/data';
+
+const query = {
+  market: 'crypto',
+  columns: ['name', 'close', 'volume'],
+  sort: { sortBy: 'volume', sortOrder: 'desc' as const },
+};
+
+// First page
+const first = await getScreener({ ...query, range: [0, 50] });
+console.log(`Total: ${first.totalCount}`);
+
+// Second page
+const second = await getScreener({ ...query, range: [50, 100] });
+console.log('Second page:', second.rows.length, 'rows');
+```
+
+</CodeGroup>
+
+<Note>
+  `getScreener` makes no real-time subscription and does not poll for updates. Each call is a single HTTP request. Exchange data may be delayed. For live price updates on screener results, use `watchQuotes` separately with the returned symbols.
+</Note>
+
+---
+
+## getHotlist
+
+`getHotlist` is a convenience wrapper around `getScreener` that returns scanner-ranked lists of gainers, losers, and most-active symbols from the US equity universe.
+
+```typescript
+import { getHotlist } from '@mathieuc/tradingview/data';
+
+const gainers = await getHotlist({ kind: 'gainers', range: [0, 10] });
+console.log('Top gainers:', gainers.rows);
+```
+
+### kind values
+
+| Kind | Ranking field | Order |
+|---|---|---|
+| `'gainers'` | `change` (% change) | Descending |
+| `'losers'` | `change` (% change) | Ascending |
+| `'mostActive'` | `volume` | Descending |
+| `'volumeGainers'` | `relative_volume_10d_calc` | Descending |
+
+The default columns returned are `name`, `close`, `change`, `volume`, and `relative_volume_10d_calc`. Override `columns`, `filter`, `market`, `range`, or `symbols` as needed:
+
+```typescript
+import { getHotlist } from '@mathieuc/tradingview/data';
+
+// Top 5 crypto gainers with extra columns
+const cryptoGainers = await getHotlist({
+  kind: 'gainers',
+  market: 'crypto',
+  columns: ['name', 'close', 'change', 'volume'],
+  filter: [], // Remove the default stock-type filter when changing market
+  range: [0, 5],
+});
+
+for (const { symbol, values } of cryptoGainers.rows) {
+  console.log(`${symbol}: +${values.change}%`);
+}
+```
+
+<Warning>
+  `getHotlist` results are screener queries — they are **not** an exact replica of the TradingView hotlist widget in the UI. The UI may apply additional universe filters, session rules, or liquidity requirements that differ from what the scanner API returns. For a non-stock market, supply an appropriate `filter` array (or `filter: []`) since the default filter restricts to `type = 'stock'` and changing `market` alone does not remove it.
+</Warning>

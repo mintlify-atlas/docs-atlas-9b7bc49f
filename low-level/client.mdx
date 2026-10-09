@@ -1,0 +1,151 @@
+---
+title: "TradingViewClient: WebSocket Connection and Session Management"
+sidebarTitle: "Client"
+description: "TradingViewClient opens a single WebSocket connection and multiplexes chart and quote sessions over it. Configure credentials, debug logging, custom transports, and timeouts."
+---
+
+`TradingViewClient` is the entry point for the low-level API. It opens a single WebSocket connection to TradingView and multiplexes any number of chart and quote sessions over it. Choose the low-level API when you need full control: running several charts simultaneously, enabling replay mode, maintaining long-lived connections you manage yourself, or sending raw protocol commands. For simpler one-shot data fetches, the [Data API](/data-api/overview) is built on top of this client and handles connection lifecycle automatically.
+
+```typescript
+import { TradingViewClient } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient({
+  credentials: {
+    session: process.env.SESSION!,
+    signature: process.env.SIGNATURE!,
+  },
+});
+
+await client.ready; // optional – packets are queued until the connection is ready
+const chart = client.createChart();
+// ... use chart, quote sessions, etc.
+await client.close();
+```
+
+## Constructor Options
+
+<ParamField body="credentials" type="{ session: string; signature: string }">
+  The `sessionid` and `sessionid_sign` cookies from your TradingView account. The client calls `getUser` internally to retrieve a WebSocket auth token from these cookies. Without credentials the session is anonymous and receives delayed or limited data.
+</ParamField>
+
+<ParamField body="authToken" type="string">
+  A WebSocket auth token (equivalent to `User.authToken`). Provide this to skip the `getUser` account lookup when you already have a valid token.
+</ParamField>
+
+<ParamField body="server" type="'data' | 'prodata' | 'widgetdata'" default="'data'">
+  Which TradingView WebSocket server to connect to. Use `'prodata'` for paid accounts that need access to professional data, or `'widgetdata'` for widget contexts.
+</ParamField>
+
+<ParamField body="location" type="string">
+  The page URL used for the account lookup, e.g. `https://fr.tradingview.com/`. Useful when your account is on a regional subdomain and the default `https://www.tradingview.com/chart/` redirect does not resolve correctly.
+</ParamField>
+
+<ParamField body="headers" type="Record<string, string>">
+  Extra headers sent with the WebSocket upgrade request. Use to set custom `User-Agent` values or pass proxy authentication headers.
+</ParamField>
+
+<ParamField body="debug" type="boolean | ((...args: unknown[]) => void)">
+  Enable protocol traffic logging. `true` uses `console.log` with a `[tradingview]` prefix. Pass a custom function to route log output elsewhere (e.g. to a logger library).
+</ParamField>
+
+<ParamField body="transport" type="TransportFactory">
+  A custom WebSocket transport factory. Use this to route traffic through a proxy, replace the `ws` package with another WebSocket implementation, or provide a test double. See [Transport](/low-level/transport) for details.
+</ParamField>
+
+<ParamField body="fetch" type="typeof fetch">
+  A custom `fetch` function used only for the account lookup (`getUser`). Useful when you want to proxy the HTTP account request but not the WebSocket connection, or in environments where the global `fetch` is not available.
+</ParamField>
+
+<ParamField body="connectTimeoutMs" type="number" default="20000">
+  Time in milliseconds allowed for the WebSocket to open and authenticate before the `ready` promise rejects with a `TIMEOUT` error.
+</ParamField>
+
+<ParamField body="inactivityTimeoutMs" type="number" default="60000">
+  Maximum silence from the server after the connection is established. TradingView sends heartbeats roughly every 10 seconds; a longer silence means the network path was lost without a clean close (e.g. sleep, NAT timeout, or proxy timeout). When the deadline is exceeded, the client fails with `CONNECTION_ERROR` and closes. Set to `0` or `Infinity` to disable.
+</ParamField>
+
+## Instance Members
+
+| Member | Type | Description |
+|---|---|---|
+| `ready` | `Promise<void>` | Resolves once the auth token has been sent and queued packets start flowing. Rejects on credential, connection, or timeout failure. |
+| `isOpen` | `boolean` | `true` while the underlying WebSocket is open. |
+| `isAuthenticated` | `boolean` | `true` once the auth token packet has been sent. |
+| `isClosed` | `boolean` | `true` after `close()` or an unexpected disconnection. |
+| `serverInfo` | `ServerHello \| undefined` | The server greeting object (`session_id`, `release`, `protocol`, …), available once received. |
+| `createChart()` | `ChartSession` | Creates a new [ChartSession](/low-level/charts) on this connection. |
+| `createQuoteSession(options?)` | `QuoteSession` | Creates a new [QuoteSession](/low-level/quotes) for live price subscriptions. |
+| `send(method, params)` | `void` | Sends a raw protocol packet. Packets are queued until the connection is ready. Use this as an escape hatch for commands the library does not wrap. |
+| `close()` | `Promise<void>` | Initiates a graceful close and resolves once the WebSocket is fully closed. Idempotent. All sessions are released without emitting errors. |
+
+## Events
+
+The client is an event emitter. Attach listeners with `on`, `once`, or `onAny` (see [Emitter API](#emitter-api) below).
+
+| Event | Arguments | Description |
+|---|---|---|
+| `open` | — | The WebSocket connection is open. |
+| `hello` | `hello: ServerHello` | The server greeting was received. Contains `session_id`, `release`, `protocol`, and other server metadata. |
+| `ready` | — | The auth token has been sent; queued packets are now flowing. |
+| `heartbeat` | `id: number` | A server heartbeat was received. The client echoes it automatically; you only need this for instrumentation. |
+| `packet` | `packet: ServerPacket` | A protocol packet that was not addressed to any registered session. Useful for raw protocol inspection. |
+| `close` | `code?: number, reason?: string` | The WebSocket closed. `code` and `reason` are the WebSocket close frame values. |
+| `error` | `error: TradingViewError` | A connection-level error occurred (authentication failure, protocol error, inactivity timeout, etc.). |
+
+## Emitter API
+
+All clients, chart sessions, quote sessions, and studies share the same typed event emitter API.
+
+```typescript
+// on() returns a function that removes the listener
+const off = client.on('ready', () => console.log('Connected'));
+off(); // remove the listener
+
+// once() fires at most one time
+client.once('hello', (hello) => console.log('Server:', hello.session_id));
+
+// off() removes a specific listener
+const handler = (error: TradingViewError) => console.error(error);
+client.on('error', handler);
+client.off('error', handler);
+
+// onAny() receives every event; the event name is the first argument
+client.onAny((event, ...args) => console.log(event, args));
+```
+
+<Note>
+  An `error` event with no listeners is written to `console.error` instead of being silently dropped. A listener that throws — or returns a rejected promise — has its exception re-thrown asynchronously via `console.error`. It never interrupts other listeners or breaks protocol state.
+</Note>
+
+## Full Example
+
+```typescript
+import { TradingViewClient } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient({
+  credentials: {
+    session: process.env.SESSION!,
+    signature: process.env.SIGNATURE!,
+  },
+  debug: true, // log all protocol traffic
+});
+
+client.on('error', (err) => console.error('Client error:', err.code, err.message));
+
+await client.ready;
+console.log('Server:', client.serverInfo?.release);
+
+const chart = client.createChart();
+chart.setMarket('BINANCE:BTCEUR', { timeframe: 'D', count: 50 });
+chart.on('update', () => console.log('Last candle:', chart.lastCandle));
+
+// clean up after 30 seconds
+setTimeout(async () => {
+  chart.delete();
+  await client.close();
+}, 30_000);
+```
+
+<Warning>
+  `TradingViewClient` does not reconnect automatically. If the connection drops unexpectedly, every chart, study, and quote subscription emits a `DISCONNECTED` error. To resume, create a new `TradingViewClient` instance and re-create your sessions.
+</Warning>

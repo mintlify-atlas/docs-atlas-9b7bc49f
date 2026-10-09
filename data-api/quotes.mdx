@@ -1,0 +1,225 @@
+---
+title: "Get Real-Time Quotes with getQuote and watchQuotes"
+sidebarTitle: "Quotes"
+description: "Fetch last price, bid, ask, volume, and change data for any TradingView symbol using getQuote, getQuotes, or watchQuotes for live streaming."
+---
+
+The quote functions provide access to the live market data that TradingView streams in its quote panel — last price, bid, ask, volume, change, and more. `getQuote` and `getQuotes` are one-shot functions that open a session, wait for data, and release all resources before returning. `watchQuotes` resolves once all requested symbols have loaded (or failed), then streams continuous updates until you call `stop()`.
+
+## getQuote / getQuotes
+
+`getQuote` fetches a single symbol; `getQuotes` fetches multiple symbols in one session and returns a map keyed by symbol string.
+
+```typescript
+import { getQuote, getQuotes } from '@mathieuc/tradingview/data';
+
+// Single quote
+const btc = await getQuote('BINANCE:BTCUSDT');
+console.log(btc.lp, btc.chp); // Last price, change in percent
+
+// Multiple quotes
+const quotes = await getQuotes({
+  symbols: ['NASDAQ:AAPL', 'NASDAQ:MSFT', 'FX:EURUSD'],
+  fields: 'price',
+});
+for (const [symbol, quote] of Object.entries(quotes)) {
+  console.log(symbol, quote.lp);
+}
+```
+
+### Options
+
+<ParamField body="symbol" type="string" required>
+  *(For `getQuote`)* Exchange-qualified symbol such as `BINANCE:BTCUSDT` or `NASDAQ:AAPL`.
+</ParamField>
+
+<ParamField body="symbols" type="string[]" required>
+  *(For `getQuotes` and `watchQuotes`)* Non-empty array of exchange-qualified symbols. Duplicates are ignored.
+</ParamField>
+
+<ParamField body="fields" type="string | string[]" default="'all'">
+  Controls which quote fields are requested from TradingView. Use `'all'` to receive every available field, `'price'` for `lp` only, or an array of specific field names such as `['lp', 'bid', 'ask', 'volume']`.
+</ParamField>
+
+<ParamField body="session" type="string" default="'regular'">
+  Trading session. `'regular'` returns regular-hours quote data. `'extended'` enables pre- and post-market data where available.
+</ParamField>
+
+<ParamField body="credentials" type="object">
+  `{ session, signature }` — TradingView account cookies. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+<ParamField body="client" type="TradingViewClient">
+  Reuse an existing open client. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+<ParamField body="clientOptions" type="object">
+  Options for the connection opened by this call. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+<ParamField body="timeoutMs" type="number" default="15000">
+  Timeout in milliseconds. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+<ParamField body="signal" type="AbortSignal">
+  Cancellation signal. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+### Response fields
+
+A quote object contains the fields that TradingView sent. The available fields depend on the symbol type and the `fields` option. Common fields include:
+
+<ResponseField name="lp" type="number">
+  Last price (most recent trade price).
+</ResponseField>
+
+<ResponseField name="lp_time" type="number">
+  Unix timestamp (seconds) of the last price update.
+</ResponseField>
+
+<ResponseField name="ch" type="number">
+  Price change from the previous close (absolute).
+</ResponseField>
+
+<ResponseField name="chp" type="number">
+  Price change from the previous close as a percentage.
+</ResponseField>
+
+<ResponseField name="bid" type="number">
+  Current best bid price.
+</ResponseField>
+
+<ResponseField name="ask" type="number">
+  Current best ask price.
+</ResponseField>
+
+<ResponseField name="volume" type="number">
+  Volume traded in the current session.
+</ResponseField>
+
+<ResponseField name="open_price" type="number">
+  Session opening price.
+</ResponseField>
+
+<ResponseField name="high_price" type="number">
+  Session high price.
+</ResponseField>
+
+<ResponseField name="low_price" type="number">
+  Session low price.
+</ResponseField>
+
+<ResponseField name="prev_close_price" type="number">
+  Previous session closing price.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Human-readable description of the symbol (e.g. `"Apple Inc"`).
+</ResponseField>
+
+<ResponseField name="currency_code" type="string">
+  Currency of the quote (e.g. `"USD"`, `"EUR"`).
+</ResponseField>
+
+### Code examples
+
+<CodeGroup>
+
+```typescript Single quote
+import { getQuote } from '@mathieuc/tradingview/data';
+
+const quote = await getQuote('BINANCE:BTCUSDT');
+
+console.log('Last price:', quote.lp);
+console.log('Change %:', quote.chp);
+console.log('Bid / Ask:', quote.bid, '/', quote.ask);
+console.log('Volume:', quote.volume);
+```
+
+```typescript Multiple quotes
+import { getQuotes } from '@mathieuc/tradingview/data';
+
+const prices = await getQuotes({
+  symbols: ['NASDAQ:AAPL', 'NASDAQ:MSFT', 'FX:EURUSD'],
+  fields: ['lp', 'chp', 'volume'],
+});
+
+for (const [symbol, quote] of Object.entries(prices)) {
+  console.log(`${symbol}: ${quote.lp} (${quote.chp}%)`);
+}
+```
+
+```typescript Extended session
+import { getQuote } from '@mathieuc/tradingview/data';
+
+// Pre/post-market data
+const quote = await getQuote({
+  symbol: 'NASDAQ:AAPL',
+  session: 'extended',
+});
+console.log('Extended hours price:', quote.lp);
+```
+
+</CodeGroup>
+
+---
+
+## watchQuotes
+
+`watchQuotes` resolves once every symbol in the list has either loaded its first quote or failed. Failing symbols are delivered to `onError` and excluded from future streaming; the others keep running. If every symbol fails, the promise rejects. Call `stop()` to end the stream.
+
+```typescript
+import { watchQuotes } from '@mathieuc/tradingview/data';
+
+const watcher = await watchQuotes(
+  {
+    symbols: ['BINANCE:BTCUSDT', 'BINANCE:ETHUSDT'],
+    fields: ['lp', 'chp'],
+  },
+  {
+    onData(symbol, quote, changes) {
+      // `changes` contains only the fields that changed in this update
+      console.log(symbol, quote.lp, `${quote.chp}%`, 'changed:', Object.keys(changes));
+    },
+    onError(error) {
+      console.error('Quote error:', error.code, error.message);
+    },
+  },
+);
+
+console.log('Initial quotes:', watcher.latest);
+
+// Stop after 15 seconds
+setTimeout(() => watcher.stop(), 15_000);
+await watcher.closed;
+```
+
+### Watcher properties
+
+<ResponseField name="watcher.latest" type="Record<string, QuoteData>">
+  A snapshot map of the most recent quote for each successfully loaded symbol, keyed by exchange-qualified symbol string.
+</ResponseField>
+
+<ResponseField name="watcher.stop()" type="() => Promise<void>">
+  Stops the watcher and releases all sessions and the connection. Idempotent.
+</ResponseField>
+
+<ResponseField name="watcher.closed" type="Promise<void>">
+  Resolves when the watcher has fully stopped.
+</ResponseField>
+
+<ResponseField name="watcher.isActive" type="boolean">
+  `true` until the watcher stops.
+</ResponseField>
+
+### Handler: onData
+
+The `onData` handler receives three arguments on every update:
+
+- **`symbol`** — the exchange-qualified symbol that updated
+- **`quote`** — the complete merged quote object with all accumulated fields
+- **`changes`** — an object containing only the fields that changed in this specific update
+
+<Warning>
+  An unknown or refused symbol rejects the one-shot `getQuote`/`getQuotes` calls with a `QUOTE_ERROR`. In `watchQuotes`, a refused symbol is delivered to `onError` and excluded from streaming. If every symbol in the list fails, the start promise rejects.
+</Warning>

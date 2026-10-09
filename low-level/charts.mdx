@@ -1,0 +1,238 @@
+---
+title: "ChartSession: Bars, Studies, Replay, and Custom Chart Types"
+sidebarTitle: "Charts"
+description: "ChartSession manages a single chart on a TradingViewClient connection. Load candles with setMarket, add studies, use fetchMore for deep history, or enable replay mode."
+---
+
+A `ChartSession` represents one chart on a `TradingViewClient` connection. It maintains a series of OHLCV bars, any attached studies, and an optional replay session, all multiplexed over the same WebSocket. Create one by calling `client.createChart()` — you can have multiple chart sessions on a single client, each for a different symbol or timeframe.
+
+```typescript
+import { TradingViewClient } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient();
+const chart = client.createChart();
+
+chart.on('symbolLoaded', (info) => console.log('Loaded:', info.description));
+chart.on('update', (changes) => console.log('Updated:', chart.lastCandle));
+chart.on('error', (err) => console.error(err.code, err.message));
+
+chart.setMarket('BINANCE:BTCEUR', { timeframe: '60', count: 300 });
+```
+
+## setMarket(symbol, options)
+
+Loads a symbol onto the chart. The first call creates the bar series; subsequent calls modify it (switching symbol, type, or entering replay mode). Later `setMarket` calls keep the existing bar count and attached studies — TradingView only accepts an empty range when modifying a series, so use `fetchMore` or a fresh chart to load a different number of bars.
+
+<ParamField path="symbol" type="string" required>
+  Exchange-qualified symbol, e.g. `BINANCE:BTCEUR` or `NASDAQ:AAPL`. A bare ticker like `BTCEUR` lets TradingView pick an exchange.
+</ParamField>
+
+<ParamField body="timeframe" type="string" default="'D'">
+  Bar resolution. Minutes: `'1'`, `'5'`, `'15'`, `'30'`, `'60'`, `'240'`. Seconds: `'1S'`. Days/weeks/months: `'D'`, `'W'`, `'M'`. Custom values like `'20'` require an account with access to them.
+</ParamField>
+
+<ParamField body="count" type="number" default="100">
+  Number of bars to load when the series is created. **Negative values** load bars *after* `to` instead of before it, allowing you to advance forward from a specific point in time. Only the first `setMarket` call of a chart applies `count`; later calls keep the existing bar count.
+</ParamField>
+
+<ParamField body="to" type="number">
+  Reference time as a Unix timestamp in seconds. When set, bars are loaded ending at (or starting from, if `count` is negative) this time. Sent to the server as `['bar_count', to, count]`.
+</ParamField>
+
+<ParamField body="adjustment" type="'splits' | 'dividends' | 'none'" default="'splits'">
+  Price adjustment for equities. `'splits'` adjusts for stock splits; `'dividends'` for both splits and dividends; `'none'` uses raw prices.
+</ParamField>
+
+<ParamField body="backAdjustment" type="boolean">
+  Back-adjust continuous futures contracts. Enables `backadjustment: 'default'` on the symbol resolution.
+</ParamField>
+
+<ParamField body="session" type="'regular' | 'extended'">
+  Trading session to use. `'extended'` includes pre-market and after-hours data where available.
+</ParamField>
+
+<ParamField body="currency" type="string">
+  Convert prices to a different currency, e.g. `'EUR'` or `'USD'`. Sent as `currency-id` in the symbol init.
+</ParamField>
+
+<ParamField body="type" type="'HeikinAshi' | 'Renko' | 'LineBreak' | 'Kagi' | 'PointAndFigure' | 'Range'">
+  Use a custom bar type instead of standard OHLC candles. Requires the corresponding server-side study to be available (some types need a paid account).
+</ParamField>
+
+<ParamField body="inputs" type="ChartTypeInputs">
+  Configuration for the custom bar type. Keys vary by type:
+
+  <Expandable title="ChartTypeInputs fields">
+    <ResponseField name="atrLength" type="number">ATR period for Renko, Kagi, and Point & Figure ATR-based sizing.</ResponseField>
+    <ResponseField name="source" type="'open' | 'high' | 'low' | 'close' | 'hl2' | 'hlc3' | 'ohlc4'">Price source for Renko, LineBreak, and Kagi.</ResponseField>
+    <ResponseField name="style" type="'ATR' | string">Sizing method for Renko, Kagi, and Point & Figure.</ResponseField>
+    <ResponseField name="boxSize" type="number">Box size for Renko and Point & Figure.</ResponseField>
+    <ResponseField name="reversalAmount" type="number">Reversal amount for Kagi and Point & Figure.</ResponseField>
+    <ResponseField name="lb" type="number">Number of lines for Line Break charts.</ResponseField>
+    <ResponseField name="range" type="number">Range size for Range bars.</ResponseField>
+    <ResponseField name="wicks" type="boolean">Show wicks on Renko bars.</ResponseField>
+    <ResponseField name="phantomBars" type="boolean">Show phantom bars on Range charts.</ResponseField>
+  </Expandable>
+</ParamField>
+
+<ParamField body="replay" type="number">
+  Start the chart in replay mode at this Unix timestamp (seconds). Creates a replay session alongside the chart session. See [Replay Mode](#replay-mode) below.
+</ParamField>
+
+## Instance Members
+
+| Member | Type | Description |
+|---|---|---|
+| `candles` | `Candle[]` | All loaded bars sorted oldest-first. Each bar has `{ time, open, high, low, close, volume }` where `time` is a Unix timestamp in seconds. |
+| `lastCandle` | `Candle \| undefined` | The most recently received bar. Convenient shortcut to `candles.at(-1)` equivalent. |
+| `symbolInfo` | `SymbolInfo \| undefined` | Symbol metadata from the server after `symbol_resolved`. Includes `name`, `description`, `exchange`, `currency_code`, `pricescale`, `timezone`, and many more fields. |
+| `timeframe` | `string` | The current bar resolution. |
+| `seriesId` | `string \| undefined` | The current series ID (`ser_1`, `ser_2`, …). Increments each time `setMarket` is called. `undefined` before the first `setMarket`. |
+| `isReplay` | `boolean` | `true` when replay mode is active. |
+| `isDeleted` | `boolean` | `true` after `delete()` or when the connection closed. |
+| `studies` | `Study[]` | Studies currently attached to this chart. |
+| `setTimeframe(tf)` | `void` | Changes the timeframe for the loaded symbol. Keeps all attached studies. Throws `INVALID_STATE` if called before `setMarket`. |
+| `setTimezone(tz)` | `void` | Changes the chart timezone. Accepts IANA timezone names and `'exchange'`. |
+| `fetchMore(count)` | `void` | Loads more bars. Positive `count` loads older bars (extending history); negative `count` loads newer bars after a past `to` reference. |
+| `createStudy(indicator)` | `Study` | Attaches a Pine or built-in indicator to this chart. See [Studies](/low-level/studies). |
+| `delete()` | `void` | Removes the chart and its replay session from the connection. Idempotent. |
+
+## Events
+
+| Event | Arguments | Description |
+|---|---|---|
+| `symbolLoaded` | `info: SymbolInfo` | The symbol was resolved; `chart.symbolInfo` is now populated. |
+| `update` | `changes: string[]` | Bars or study data changed. `changes` lists the keys that were updated: `'$prices'` for bar data and study IDs (e.g. `'st_Ab12'`) for study updates. |
+| `seriesLoading` | — | The server started loading bars for the current symbol. |
+| `seriesCompleted` | `info: SeriesCompletedInfo` | The requested bars finished loading. `info.dataCompleted` is `'end'` when no earlier history exists and `'limit'` when the account limit has been reached. `info.status` is `'streaming'` in live mode or `'replay'` in replay mode. |
+| `error` | `error: TradingViewError` | A chart-level error: `SYMBOL_ERROR`, `SERIES_ERROR`, or `CRITICAL_ERROR`. |
+
+Replay mode adds further events — see [Replay Mode](#replay-mode).
+
+## Replay Mode
+
+Replay mode lets you step through historical bars one at a time, with all attached studies re-computing at each step. Pass a Unix timestamp to `setMarket` as the `replay` option to enter replay mode at that point in time.
+
+```typescript
+import { TradingViewClient, BuiltInIndicator } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient({ credentials });
+const chart = client.createChart();
+
+// Start replay 7 days ago
+chart.setMarket('BINANCE:BTCEUR', {
+  timeframe: 'D',
+  replay: Math.round(Date.now() / 1000) - 86_400 * 7,
+  count: 1,
+});
+
+// Attach a volume indicator in replay mode
+const volume = chart.createStudy(new BuiltInIndicator('Volume@tv-basicstudies-241'));
+
+chart.on('replayEnd', () => console.log('Reached the present'));
+chart.on('update', () => {
+  const bar = chart.lastCandle;
+  if (bar) console.log(new Date(bar.time * 1000).toISOString(), bar.close);
+});
+
+// Wait for the first bars, then step forward one bar at a time
+await new Promise((resolve) => chart.once('update', resolve));
+
+await chart.replayStep(1);    // one bar forward; resolves when server confirms
+await chart.replayStart(500); // play at 2 bars per second (one bar every 500 ms)
+await chart.replayStop();     // pause
+```
+
+**Replay methods:**
+
+| Method | Description |
+|---|---|
+| `replayStep(count?)` | Moves forward by `count` bars (default 1). Returns a Promise that resolves when the server acknowledges the step. |
+| `replayStart(intervalMs?)` | Plays automatically at one bar per `intervalMs` milliseconds (default 1000). Returns a Promise that resolves on acknowledgement. |
+| `replayStop()` | Pauses automatic replay. Returns a Promise that resolves on acknowledgement. |
+
+**Replay events:**
+
+| Event | Arguments | Description |
+|---|---|---|
+| `replayLoaded` | `instanceId: string` | The replay session is ready; `instanceId` is the server-assigned replay instance ID. |
+| `replayPoint` | `time: number` | The replay cursor moved; `time` is the new cursor position as a Unix timestamp in seconds. |
+| `replayResolution` | `resolution: string, stepResolution: string` | The server reported available resolutions for the current replay position. |
+| `replayEnd` | — | The replay has reached the present; no more bars can be stepped forward. |
+
+<Warning>
+  `replayStep`, `replayStart`, and `replayStop` reject with an `INVALID_STATE` error if called outside replay mode. They also reject if the chart is deleted or if `setMarket` is called while a request is pending.
+</Warning>
+
+## Full Example
+
+<CodeGroup>
+```typescript Simple Chart
+import { TradingViewClient } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient();
+const chart = client.createChart();
+
+chart.on('symbolLoaded', (info) => {
+  console.log(`Loaded: ${info.description} (${info.exchange})`);
+});
+
+chart.on('update', (changes) => {
+  if (changes.includes('$prices') && chart.lastCandle) {
+    const c = chart.lastCandle;
+    console.log(`${new Date(c.time * 1000).toISOString()} O:${c.open} H:${c.high} L:${c.low} C:${c.close}`);
+  }
+});
+
+chart.on('seriesCompleted', ({ dataCompleted }) => {
+  if (dataCompleted === 'end') console.log('Reached the beginning of history');
+});
+
+// Load 300 hourly bars for BTC/EUR
+chart.setMarket('BINANCE:BTCEUR', { timeframe: '60', count: 300 });
+
+// Fetch another 100 bars of older history after data arrives
+chart.once('seriesCompleted', () => chart.fetchMore(100));
+
+setTimeout(async () => {
+  // Switch to a different symbol – studies are kept
+  chart.setMarket('NASDAQ:AAPL', { timeframe: 'D' });
+}, 5_000);
+
+setTimeout(async () => {
+  chart.delete();
+  await client.close();
+}, 15_000);
+```
+
+```typescript Heikin Ashi with Renko
+import { TradingViewClient } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient();
+const chart = client.createChart();
+
+chart.on('symbolLoaded', (info) => console.log(info.description));
+chart.on('update', () => console.log(chart.lastCandle));
+
+// Heikin Ashi bars
+chart.setMarket('BINANCE:BTCEUR', {
+  timeframe: 'D',
+  type: 'HeikinAshi',
+});
+
+setTimeout(() => {
+  // Switch to ATR Renko
+  chart.setMarket('BINANCE:BTCEUR', {
+    timeframe: 'D',
+    type: 'Renko',
+    inputs: { style: 'ATR', atrLength: 14 },
+  });
+}, 5_000);
+
+setTimeout(async () => { await client.close(); }, 12_000);
+```
+</CodeGroup>
+
+<Tip>
+  You can reuse the same `ChartSession` for different symbols by calling `setMarket` again. This is more efficient than creating a new chart because it reuses the same server-side chart session and keeps any attached studies. Only the bar data and symbol metadata are reset.
+</Tip>

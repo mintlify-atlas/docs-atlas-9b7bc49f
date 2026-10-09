@@ -1,0 +1,349 @@
+---
+title: "Migrate from TradingView-API v3 to v4"
+sidebarTitle: "v3 → v4 Migration"
+description: "Version 4 is a complete TypeScript rewrite of TradingView-API with no compatibility layer. This guide translates every v3 pattern to its v4 equivalent."
+---
+
+Version 4 is a complete TypeScript rewrite of `@mathieuc/tradingview` — there is no compatibility shim and no gradual upgrade path. Every v3 capability is preserved under a more consistent, fully typed API. The changes follow a clear set of principles: events replace custom callback methods, options use camelCase throughout, data is returned oldest-first, and errors are structured `TradingViewError` objects instead of raw string lists. This guide shows the direct translation for every area of the API.
+
+<Warning>
+  The v3 package (3.x) remains published on npm. If you need to stay on v3 for now, pin your dependency: `npm install @mathieuc/tradingview@3`. v4 is the current default when you install without a version specifier.
+</Warning>
+
+## Package and Module System
+
+| Area | v3 | v4 |
+|---|---|---|
+| Module format | CommonJS: `const TradingView = require('@mathieuc/tradingview')` | ESM: `import { ... } from '@mathieuc/tradingview'`. On Node ≥ 20.19 or ≥ 22.12, `require()` of the ESM package also works. |
+| High-level data | `agent.js` preview (`fetchCandles`, `watchCandles`) | `@mathieuc/tradingview/data` (`getCandles`, `watchCandles`, `getQuote`, `getIndicatorData`, …) |
+| Provider injection | Preview `TradingViewProvider` / `MarketDataProvider` | Provider injection remains: `getCandles(query, provider)` or `watchCandles(query, handlers, provider)` |
+| Runtime | Node ≥ 14, untyped JSDoc | Node ≥ 20 or Bun, bundled TypeScript declarations |
+| Dependencies | `axios`, `jszip`, `ws` | `ws` only (HTTP uses the built-in `fetch`) |
+
+## Simplest Migration: Use the Data API
+
+If you only need historical candles, the simplest path is to replace the entire v3 client setup with a single `getCandles` call:
+
+<Tabs>
+  <Tab title="v3">
+    ```javascript
+    const TradingView = require('@mathieuc/tradingview');
+    const client = new TradingView.Client();
+    const chart = new client.Session.Chart();
+    chart.setMarket('BINANCE:BTCEUR', { timeframe: 'D', range: 100 });
+    chart.onUpdate(() => {
+      console.log(chart.periods);
+      client.end();
+    });
+    ```
+  </Tab>
+  <Tab title="v4">
+    ```javascript
+    import { getCandles } from '@mathieuc/tradingview/data';
+    const candles = await getCandles({ symbol: 'BINANCE:BTCEUR', timeframe: 'D', count: 100 });
+    console.log(candles);
+    ```
+  </Tab>
+</Tabs>
+
+## Client
+
+The `Client` constructor option names and all event methods have changed. Events now use the standard Node.js EventEmitter API (`on`, `once`, `onAny`) instead of dedicated callback methods.
+
+| v3 | v4 |
+|---|---|
+| `new Client({ token, signature })` | `new TradingViewClient({ credentials: { session, signature } })` |
+| `server`, `location`, `headers` options | Same names |
+| `DEBUG: true` (sets a global flag) | `debug: true` or `debug: (...args) => {}` (per-client) |
+| *(not available)* | `authToken`, `transport`, `fetch`, `connectTimeoutMs`, `client.ready` |
+| `client.onConnected(cb)` | `client.on('open', cb)` |
+| `client.onDisconnected(cb)` | `client.on('close', cb)` |
+| `client.onLogged(cb)` | `client.on('ready', cb)`; server greeting is `client.on('hello', cb)` / `client.serverInfo` |
+| `client.onPing(cb)` | `client.on('heartbeat', cb)` |
+| `client.onData(cb)` | `client.on('packet', cb)` |
+| `client.onError(cb)` (receives `...messages`) | `client.on('error', (error) => ...)` (receives a `TradingViewError`) |
+| `client.onEvent(cb)` | `client.onAny((event, ...args) => ...)` |
+| `client.isLogged`, `client.isOpen` | `client.isAuthenticated`, `client.isOpen` (and `client.isClosed`) |
+| `client.send(t, p)` / `client.sendQueue()` | `client.send(method, params)`; the queue is flushed automatically |
+| `client.end()` | `await client.close()` (resolves once actually closed) |
+| `new client.Session.Chart()` | `client.createChart()` |
+| `new client.Session.Quote(options)` | `client.createQuoteSession(options)` |
+
+<Tabs>
+  <Tab title="v3">
+    ```javascript
+    const client = new TradingView.Client({ token: 'sess', signature: 'sig' });
+    client.onConnected(() => console.log('connected'));
+    client.onLogged(() => console.log('logged in'));
+    client.onError((...messages) => console.error(messages));
+    // later...
+    client.end();
+    ```
+  </Tab>
+  <Tab title="v4">
+    ```javascript
+    import { TradingViewClient } from '@mathieuc/tradingview';
+    const client = new TradingViewClient({ credentials: { session: 'sess', signature: 'sig' } });
+    client.on('open', () => console.log('connected'));
+    client.on('ready', () => console.log('authenticated'));
+    client.on('error', (error) => console.error(error.code, error.message));
+    // later...
+    await client.close();
+    ```
+  </Tab>
+</Tabs>
+
+## Charts
+
+Several option names and property names have changed. The most important behavioral change is that **`chart.candles` (formerly `chart.periods`) is now sorted oldest-first** instead of newest-first.
+
+| v3 | v4 |
+|---|---|
+| `chart.setMarket(symbol, { range, to, backadjustment, ... })` | `chart.setMarket(symbol, { count, to, backAdjustment, ... })`. `timeframe`, `adjustment`, `session`, `currency`, `type`, `inputs`, `replay` are unchanged. Default timeframe is now `D` (v3: `240`). |
+| `chart.setSeries(timeframe)` | `chart.setTimeframe(timeframe)` — throws `INVALID_STATE` before `setMarket` instead of emitting an error |
+| `chart.periods` (newest first; volume rounded to 2 decimals) | `chart.candles` (**oldest first**; raw volume) and `chart.lastCandle` |
+| `chart.infos` | `chart.symbolInfo` |
+| `chart.setTimezone(tz)` | Same (no longer clears loaded bars) |
+| `chart.fetchMore(n)` | Same |
+| `chart.replayStep/Start/Stop()` | Same; now rejects with `INVALID_STATE` outside replay mode instead of never resolving |
+| `chart.onSymbolLoaded(cb)` | `chart.on('symbolLoaded', (info) => ...)` |
+| `chart.onUpdate(cb)` | `chart.on('update', (changes) => ...)` |
+| `chart.onReplayLoaded/Point/Resolution/End(cb)` | `chart.on('replayLoaded' / 'replayPoint' / 'replayResolution' / 'replayEnd', cb)` |
+| `chart.onError(cb)` | `chart.on('error', (error) => ...)` |
+| *(not available)* | `chart.on('seriesCompleted', ...)`, `chart.on('seriesLoading', ...)` |
+| `new chart.Study(indicator)` | `chart.createStudy(indicator)` |
+| `chart.delete()` | Same (idempotent) |
+
+<Tabs>
+  <Tab title="v3">
+    ```javascript
+    chart.setMarket('BINANCE:BTCEUR', { timeframe: 'D', range: 200 });
+    chart.onUpdate(() => {
+      // periods[0] is the NEWEST bar
+      const last = chart.periods[0];
+      console.log(chart.infos.description, last.close);
+    });
+    chart.onError((...messages) => console.error(messages));
+    ```
+  </Tab>
+  <Tab title="v4">
+    ```javascript
+    chart.setMarket('BINANCE:BTCEUR', { timeframe: 'D', count: 200 });
+    chart.on('update', () => {
+      // lastCandle is the newest; candles[0] is the OLDEST
+      const last = chart.lastCandle;
+      console.log(chart.symbolInfo?.description, last?.close);
+    });
+    chart.on('error', (error) => console.error(error.code, error.message));
+    ```
+  </Tab>
+</Tabs>
+
+## Studies
+
+Study data and graphics have been renamed for consistency. Like chart candles, **`study.values` (formerly `study.periods`) is now sorted oldest-first**.
+
+| v3 | v4 |
+|---|---|
+| `study.periods` (newest first) | `study.values` (**oldest first**; still keyed by `$time` and plot names) |
+| `study.graphic` | `study.graphics`; `tables[i].cells()` is now the `tables[i].cells` array; `raw()` is now the `raw` object |
+| `study.strategyReport` | Same |
+| `study.instance` | `study.indicator` |
+| `study.setIndicator(indicator)`, `study.remove()` | Same |
+| `study.onReady/onUpdate/onError(cb)` | `study.on('ready' / 'update' / 'error', cb)` (also `'loading'`) |
+
+<Tabs>
+  <Tab title="v3">
+    ```javascript
+    const study = new chart.Study(indicator);
+    study.onReady(() => {
+      // periods[0] is the NEWEST row
+      console.log(study.periods[0]);
+      console.log(study.graphic.raw());
+    });
+    ```
+  </Tab>
+  <Tab title="v4">
+    ```javascript
+    const study = chart.createStudy(indicator);
+    study.on('ready', () => {
+      // values[0] is the OLDEST row; values.at(-1) is newest
+      console.log(study.values.at(-1));
+      console.log(study.graphics.raw);
+    });
+    ```
+  </Tab>
+</Tabs>
+
+## Quotes
+
+The quote session is now created through the client factory method, and individual symbol subscriptions use `subscribe` instead of a constructor.
+
+| v3 | v4 |
+|---|---|
+| `new client.Session.Quote({ fields: 'all' })` | `client.createQuoteSession({ fields: 'all' })` |
+| `{ customFields: ['lp'] }` | `{ fields: ['lp'] }` |
+| `new quoteSession.Market(symbol, session)` | `quoteSession.subscribe(symbol, { session })` |
+| `market.onLoaded/onData/onError/onEvent(cb)` | `subscription.on('loaded' / 'data' / 'error', cb)` / `onAny(cb)`; `data` also receives the changed fields |
+| `market.close()`, `quoteSession.delete()` | `subscription.close()`, `quoteSession.delete()` |
+
+<Tabs>
+  <Tab title="v3">
+    ```javascript
+    const quoteSession = new client.Session.Quote({ customFields: ['lp', 'chp'] });
+    const market = new quoteSession.Market('BINANCE:BTCUSDT', 'extended');
+    market.onData((data) => console.log(data.lp));
+    market.onError((...msgs) => console.error(msgs));
+    ```
+  </Tab>
+  <Tab title="v4">
+    ```javascript
+    const quoteSession = client.createQuoteSession({ fields: ['lp', 'chp'] });
+    const sub = quoteSession.subscribe('BINANCE:BTCUSDT', { session: 'extended' });
+    sub.on('data', (data, changed) => console.log(data.lp));
+    sub.on('error', (error) => console.error(error.code, error.message));
+    ```
+  </Tab>
+</Tabs>
+
+## Indicators
+
+The `getIndicator` function signature changed from positional arguments to an options object. Input mutation methods were renamed for clarity.
+
+| v3 | v4 |
+|---|---|
+| `TradingView.getIndicator(id, version, session, signature)` | `getIndicator(id, { version, credentials })` |
+| `indicator.pineId`, `indicator.pineVersion` | `indicator.id`, `indicator.version` |
+| `indicator.setOption(key, value)` | `indicator.setInput(key, value)` (chainable; also `setInputs({...})`, `clone()`) |
+| `indicator.setType(type)` | Same |
+| `new BuiltInIndicator(type)` + `setOption(key, value, FORCE)` | Same, plus initial options: `new BuiltInIndicator(type, { first_bar_time })` |
+
+<Tabs>
+  <Tab title="v3">
+    ```javascript
+    const indicator = await TradingView.getIndicator('STD;RSI', 'last', session, signature);
+    indicator.setOption('Length', 21);
+    indicator.setOption('Source', 'close');
+    ```
+  </Tab>
+  <Tab title="v4">
+    ```javascript
+    import { getIndicator } from '@mathieuc/tradingview';
+    const indicator = await getIndicator('STD;RSI', {
+      credentials: { session, signature },
+    });
+    indicator.setInput('Length', 21).setInput('Source', 'close');
+    // or: indicator.setInputs({ Length: 21, Source: 'close' });
+    ```
+  </Tab>
+</Tabs>
+
+## HTTP Functions
+
+All utility HTTP functions were renamed to be more consistent and descriptive.
+
+| v3 | v4 |
+|---|---|
+| `searchMarketV3(text, filter, offset)` | `searchMarkets(text, { type, offset, exchange })` |
+| `searchMarket(text, filter)` (deprecated v1 endpoint) | `searchMarkets(text, { type })` |
+| `result.getTA()` | `getTechnicalAnalysis(result.id)` |
+| `getTA(symbol)` (returned `false` without data) | `getTechnicalAnalysis(symbol)` (returns `null`) |
+| `searchIndicator(text)` + `result.get()` | `searchIndicators(text)` + `getIndicator(result.id, { version: result.version })` |
+| `getPrivateIndicators(session, signature)` + `result.get()` | `getPrivateIndicators({ session, signature })` + `getIndicator(result.id, { version, credentials })` |
+| `loginUser(username, password, remember, UA)` | `loginUser({ username, password, remember, userAgent })` |
+| `getUser(session, signature, location)` | `getUser({ session, signature }, { location })` (`id` is now a `number`) |
+| `getChartToken(layout, { id, session, signature })` | `getChartToken(layout, { userId, credentials: { session, signature } })` |
+| `getDrawings(layout, symbol, { id, session, signature }, chartID)` | `getDrawings(layout, { symbol, chartId, userId, credentials })` |
+| `new PinePermManager(session, signature, pineId)` | `new PinePermissionManager(pineId, { credentials: { session, signature } })` (same methods) |
+
+## Errors
+
+v3 passed lists of raw strings to `onError` callbacks, or printed them directly. v4 replaces every error path with a structured `TradingViewError`.
+
+<Tabs>
+  <Tab title="v3">
+    ```javascript
+    chart.onError((...messages) => {
+      // messages is a string array; no structured code
+      if (messages.some((m) => m.includes('symbol_error'))) {
+        console.error('Bad symbol');
+      }
+    });
+    ```
+  </Tab>
+  <Tab title="v4">
+    ```javascript
+    import { TradingViewError } from '@mathieuc/tradingview';
+
+    chart.on('error', (error) => {
+      // error.code is one of: SYMBOL_ERROR, SERIES_ERROR, CRITICAL_ERROR,
+      // STUDY_ERROR, AUTH_ERROR, TIMEOUT, PROTOCOL_ERROR, …
+      switch (error.code) {
+        case 'SYMBOL_ERROR':
+          console.error('Bad symbol:', error.message);
+          break;
+        case 'AUTH_ERROR':
+          console.error('Credentials rejected:', error.message);
+          break;
+        default:
+          console.error(`[${error.code}]`, error.message, error.details);
+      }
+    });
+    ```
+  </Tab>
+</Tabs>
+
+Study errors now include context in their message (for example: `Study error: Invalid value of the 'factor' argument (-1)…`). See the [Error Handling guide](/guides/errors) for the full list of error codes.
+
+## Data API (Formerly `agent.js` Preview)
+
+The high-level data API moved from the `agent.js` preview file to the official `@mathieuc/tradingview/data` sub-path, with renamed functions and an enriched return type from `watchCandles`.
+
+| `agent.js` (v3 preview) | v4 (`@mathieuc/tradingview/data`) |
+|---|---|
+| `fetchCandles({ symbol, timeframe, limit, timeoutMs, signal })` | `getCandles({ symbol, timeframe, count, timeoutMs, signal })` |
+| `watchCandles(query, { onData, onError })` → `{ latest, stop() }` | `watchCandles(query, { onData, onError })` → `{ latest, stop(), closed, isActive, symbolInfo }` |
+| `TradingViewProvider` / `MarketDataProvider` injection | Provider injection remains: `getCandles(query, provider)` or `watchCandles(query, handlers, provider)` |
+
+<Tabs>
+  <Tab title="v3 (agent.js)">
+    ```javascript
+    import { fetchCandles, watchCandles } from './agent.js';
+
+    // One-shot
+    const candles = await fetchCandles({ symbol: 'BINANCE:BTCEUR', timeframe: 'D', limit: 100 });
+
+    // Watcher
+    const { latest, stop } = await watchCandles(
+      { symbol: 'BINANCE:BTCEUR', timeframe: '1' },
+      { onData: (c) => console.log(c), onError: (e) => console.error(e) },
+    );
+    setTimeout(stop, 30_000);
+    ```
+  </Tab>
+  <Tab title="v4">
+    ```javascript
+    import { getCandles, watchCandles } from '@mathieuc/tradingview/data';
+
+    // One-shot (limit → count)
+    const candles = await getCandles({ symbol: 'BINANCE:BTCEUR', timeframe: 'D', count: 100 });
+
+    // Watcher — stop() is now async; closed is a Promise; isActive and symbolInfo added
+    const watcher = await watchCandles(
+      { symbol: 'BINANCE:BTCEUR', timeframe: '1', count: 10 },
+      {
+        onData: (candles) => console.log(candles.at(-1)),
+        onError: (error) => console.error(error.code, error.message),
+      },
+    );
+    console.log('Watching:', watcher.symbolInfo?.description);
+    console.log('Active:', watcher.isActive);
+    setTimeout(() => watcher.stop(), 30_000);
+    await watcher.closed; // resolves when the watcher has fully shut down
+    ```
+  </Tab>
+</Tabs>
+
+<Note>
+  For a complete reference of the high-level data functions (`getCandles`, `watchCandles`, `getQuote`, `getScreener`, and more), see the [Data API overview](/data-api/overview). For the low-level WebSocket client and chart/quote sessions, see the [Client reference](/low-level/client).
+</Note>

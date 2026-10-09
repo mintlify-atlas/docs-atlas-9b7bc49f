@@ -1,0 +1,261 @@
+---
+title: "Run Pine Indicators and Strategy Backtests with getIndicatorData"
+sidebarTitle: "Indicators"
+description: "Use getIndicatorData to compute built-in and Pine indicator values, drawings, and strategy performance reports against any TradingView symbol and timeframe."
+---
+
+`getIndicatorData` runs any TradingView indicator or Pine strategy against a symbol and timeframe, returning computed plot values, drawing graphics, and a full strategy backtest report. It supports built-in studies (no account required), community and private Pine scripts (account required), and accepts both indicator IDs and indicator instances. `watchIndicator` streams the same result in real time on every study update.
+
+## getIndicatorData
+
+```typescript
+import { getIndicatorData } from '@mathieuc/tradingview/data';
+
+// Built-in study — no account needed
+const volumeData = await getIndicatorData({
+  symbol: 'BINANCE:BTCEUR',
+  indicator: 'Volume@tv-basicstudies-241',
+  count: 5,
+});
+console.log('Volume rows:', volumeData.values);
+
+// Pine RSI with custom length — account required
+const rsi = await getIndicatorData({
+  symbol: 'BINANCE:BTCEUR',
+  timeframe: '60',
+  indicator: 'STD;RSI',
+  inputs: { Length: 21 },
+  credentials: {
+    session: process.env.TV_SESSION!,
+    signature: process.env.TV_SIGNATURE!,
+  },
+});
+console.log('Last RSI row:', rsi.values.at(-1));
+// { $time: 1700000000, RSI: 54.2, ... }
+```
+
+### Options
+
+<ParamField body="symbol" type="string" required>
+  Exchange-qualified symbol such as `BINANCE:BTCUSDT` or `NASDAQ:AAPL`. Use `searchMarkets` to discover valid symbols.
+</ParamField>
+
+<ParamField body="indicator" type="string | PineIndicator | BuiltInIndicator" required>
+  The indicator to compute. Accepts:
+  - A **script ID string**: `'STD;RSI'` (built-in Pine), `'PUB;xxxx'` (community/published), `'USER;xxxx'` (private). Use `searchIndicators` to find IDs.
+  - A **built-in study type string** containing `@`, e.g. `'Volume@tv-basicstudies-241'`. Works without an account.
+  - A **`PineIndicator`** or **`BuiltInIndicator`** instance — copied, never mutated.
+</ParamField>
+
+<ParamField body="timeframe" type="string" default="'D'">
+  Bar resolution. Same values as `getCandles`. See [Candles](/data-api/candles#options).
+</ParamField>
+
+<ParamField body="inputs" type="Record<string, unknown>">
+  Input values to apply to the indicator. For Pine scripts, keys can be input IDs (`in_0`), zero-based numeric indices, inline display names, or internal IDs. For built-in studies, keys are option names. Type and option validation is performed by the library.
+</ParamField>
+
+<ParamField body="count" type="number" default="100">
+  Number of bars to load. The server computes indicator values over this window.
+</ParamField>
+
+<ParamField body="version" type="string">
+  Pin a specific published version of an indicator when `indicator` is a script ID. Defaults to the latest version.
+</ParamField>
+
+<ParamField body="to" type="Date | number">
+  `Date` or Unix seconds. Newest bar time. Defaults to now.
+</ParamField>
+
+<ParamField body="credentials" type="object">
+  `{ session, signature }` — required for Pine script IDs (`STD;`, `PUB;`, `USER;`). Not needed for built-in study type strings. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+<ParamField body="client" type="TradingViewClient">
+  Reuse an existing open client. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+<ParamField body="clientOptions" type="object">
+  Options for the connection opened by this call. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+<ParamField body="timeoutMs" type="number" default="15000">
+  Timeout in milliseconds. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+<ParamField body="signal" type="AbortSignal">
+  Cancellation signal. See [Data API Overview](/data-api/overview#connection-options).
+</ParamField>
+
+### Return type: IndicatorData
+
+<ResponseField name="indicator" type="Indicator">
+  The resolved indicator definition used for this computation (the `PineIndicator` or `BuiltInIndicator` instance, with inputs applied).
+</ResponseField>
+
+<ResponseField name="candles" type="Candle[]">
+  The underlying chart bars used for the computation, oldest first. Each element is `{ time, open, high, low, close, volume }` with `time` as Unix seconds.
+</ResponseField>
+
+<ResponseField name="values" type="StudyValue[]">
+  One row per bar, oldest first. Each row contains `$time` (Unix seconds) plus one key per plot output. Unnamed or duplicate plots are named `plot_N`. The server may compute a few rows before the first returned candle — these rows have no corresponding candle entry.
+</ResponseField>
+
+<ResponseField name="graphics" type="GraphicsData">
+  Drawing objects produced by the indicator:
+  <Expandable title="Graphics fields">
+    <ResponseField name="labels" type="object[]">Labels drawn on the chart.</ResponseField>
+    <ResponseField name="lines" type="object[]">Line drawings.</ResponseField>
+    <ResponseField name="boxes" type="object[]">Box drawings.</ResponseField>
+    <ResponseField name="tables" type="object[]">Table drawings with `cells` arrays.</ResponseField>
+    <ResponseField name="polygons" type="object[]">Polygon drawings.</ResponseField>
+    <ResponseField name="horizLines" type="object[]">Horizontal lines.</ResponseField>
+    <ResponseField name="horizHists" type="object[]">Horizontal histograms.</ResponseField>
+    <ResponseField name="raw" type="unknown">Raw graphics payload from the server.</ResponseField>
+  </Expandable>
+  X positions in graphics objects are expressed as **bars back from the latest loaded bar**, not as absolute timestamps.
+</ResponseField>
+
+<ResponseField name="strategyReport" type="StrategyReport">
+  For Pine strategies: contains `performance`, `trades`, `history`, `currency`, and `settings`. Empty (no performance data, no trades) for regular studies. See [Strategy reports](#strategy-reports) below.
+</ResponseField>
+
+### Finding indicator IDs
+
+Use `searchIndicators` to find the script ID for any indicator:
+
+```typescript
+import { searchIndicators } from '@mathieuc/tradingview/data';
+
+const results = await searchIndicators('RSI');
+for (const indicator of results.slice(0, 5)) {
+  console.log(indicator.id, '-', indicator.name, `[${indicator.access}]`);
+}
+// STD;RSI - Relative Strength Index [open]
+// PUB;xxxx - Custom RSI by some_user [open]
+```
+
+Pass the `id` (and optionally `version`) from a search result directly to `getIndicatorData`.
+
+---
+
+## Strategy reports
+
+When `indicator` is a Pine strategy (script IDs starting with `STD;...%Strategy` or community strategies), `strategyReport` in the result contains the full backtest data.
+
+### summarizeStrategyReport
+
+Use the `summarizeStrategyReport` helper to extract the key aggregate metrics:
+
+```typescript
+import { getIndicatorData, summarizeStrategyReport } from '@mathieuc/tradingview/data';
+
+const { strategyReport } = await getIndicatorData({
+  symbol: 'BINANCE:BTCEUR',
+  timeframe: '60',
+  count: 300,
+  indicator: 'STD;Supertrend%Strategy',
+  inputs: {
+    commission_type: 'percent',
+    default_qty_value: 20,
+  },
+  credentials: {
+    session: process.env.TV_SESSION!,
+    signature: process.env.TV_SIGNATURE!,
+  },
+  timeoutMs: 30_000,
+});
+
+const summary = summarizeStrategyReport(strategyReport);
+console.log(summary);
+// {
+//   tradeRecordCount: 42,
+//   closedTradeCount: 41,
+//   openTradeCount: 1,
+//   closedNetProfit: 1234.56,
+//   openPnL: 78.9,
+//   totalPnL: 1313.46,
+//   currency: 'EUR',
+// }
+
+// Trade records are most recent first
+console.log('Latest trades:', strategyReport.trades.slice(0, 5));
+```
+
+The `summarizeStrategyReport` function returns:
+
+<ResponseField name="tradeRecordCount" type="number">
+  Total number of trade records in the result (may differ from closed + open counts in a partial report).
+</ResponseField>
+
+<ResponseField name="closedTradeCount" type="number | undefined">
+  Number of closed trades, from `performance.all.totalTrades`. `undefined` if not reported.
+</ResponseField>
+
+<ResponseField name="openTradeCount" type="number | undefined">
+  Number of open trades, from `performance.all.totalOpenTrades`. `undefined` if not reported.
+</ResponseField>
+
+<ResponseField name="closedNetProfit" type="number | undefined">
+  Net profit from closed trades, from `performance.all.netProfit`. `undefined` if not finite.
+</ResponseField>
+
+<ResponseField name="openPnL" type="number | undefined">
+  Unrealized profit/loss on open positions, from `performance.openPL`. `undefined` if not finite.
+</ResponseField>
+
+<ResponseField name="totalPnL" type="number | undefined">
+  Sum of `closedNetProfit` and `openPnL`. Only present when both values are available. Missing open PnL is **not** assumed to be zero.
+</ResponseField>
+
+<ResponseField name="currency" type="string | undefined">
+  Currency of the profit/loss values, e.g. `'USD'` or `'EUR'`.
+</ResponseField>
+
+<Note>
+  Trade records can include open positions with a current exit valuation. The presence of an `exit` object does **not** establish that a trade is closed. Use the reported aggregate counts (`closedTradeCount`, `openTradeCount`) — not the record count — to determine open/closed status. Counts may differ from available records in partial reports.
+</Note>
+
+---
+
+## watchIndicator
+
+`watchIndicator` streams the same `IndicatorData` result as `getIndicatorData`, emitting a fresh snapshot on every study update. Resolves once the initial computation completes.
+
+```typescript
+import { watchIndicator } from '@mathieuc/tradingview/data';
+
+const watcher = await watchIndicator(
+  {
+    symbol: 'BINANCE:BTCUSDT',
+    timeframe: '1',
+    indicator: 'STD;RSI',
+    inputs: { Length: 14 },
+    credentials: {
+      session: process.env.TV_SESSION!,
+      signature: process.env.TV_SIGNATURE!,
+    },
+  },
+  {
+    onData(data) {
+      console.log('Latest RSI:', data.values.at(-1));
+    },
+    onError(error) {
+      console.error('Indicator error:', error.code, error.message);
+    },
+  },
+);
+
+console.log('Initial result:', watcher.latest?.values.at(-1));
+
+setTimeout(() => watcher.stop(), 60_000);
+await watcher.closed;
+```
+
+<ResponseField name="watcher.latest" type="IndicatorData | undefined">
+  The most recent full `IndicatorData` result. `undefined` before the first update (though the promise resolves only after the first result).
+</ResponseField>
+
+<Warning>
+  Without credentials, TradingView rejects Pine script IDs with `STUDY_ERROR` ("maximum number of studies per chart"). Built-in study type strings (those containing `@`) work without an account. If you are authenticated but the indicator is still refused, verify that your subscription tier grants access to that study.
+</Warning>

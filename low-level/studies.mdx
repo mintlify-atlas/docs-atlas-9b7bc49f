@@ -1,0 +1,249 @@
+---
+title: "Studies: Pine Indicators, Built-In Studies, and Strategy Reports"
+sidebarTitle: "Studies"
+description: "Add Pine or built-in studies to a ChartSession with createStudy. Access plot values, graphics, and strategy reports. Manage inputs and swap indicators at runtime."
+---
+
+Studies are indicators that run on a `ChartSession`. Each study is attached to the chart's bar series and receives updated plot values whenever new bars arrive. Create a study by passing an indicator definition to `chart.createStudy(indicator)`. The indicator can be a `PineIndicator` loaded from TradingView (built-in, community, or private Pine scripts) or a `BuiltInIndicator` for native TradingView studies like Volume and Volume Profile.
+
+```typescript
+import { TradingViewClient, getIndicator, BuiltInIndicator } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient({ credentials });
+const chart = client.createChart();
+chart.setMarket('BINANCE:BTCEUR', { timeframe: 'D' });
+
+// Pine indicator
+const rsi = await getIndicator('STD;RSI', { credentials });
+rsi.setInput('Length', 21);
+const rsiStudy = chart.createStudy(rsi);
+
+rsiStudy.on('ready', () => console.log('RSI values:', rsiStudy.values.at(-1)));
+rsiStudy.on('update', (changes) => console.log('Changed:', changes));
+rsiStudy.on('error', (err) => console.error(err.code, err.message));
+```
+
+## Indicator Definitions
+
+Before attaching a study you need an indicator definition. There are two kinds:
+
+### PineIndicator — `getIndicator(id, options?)`
+
+Loads a Pine script definition from TradingView's `pine-facade` API. The `id` prefix determines where the script lives:
+
+| Prefix | Example | Description |
+|---|---|---|
+| `STD;` | `STD;RSI` | Built-in Pine indicators (available to everyone) |
+| `PUB;` | `PUB;Ab12Cd34` | Published community scripts |
+| `USER;` | `USER;Ab12Cd34` | Your own saved private scripts |
+
+```typescript
+import { getIndicator, parseIndicatorDefinition } from '@mathieuc/tradingview';
+
+// Load the built-in RSI
+const rsi = await getIndicator('STD;RSI');
+
+// Load a specific version of a community indicator (needs credentials if invite-only)
+const community = await getIndicator('PUB;xxxx', { version: '2', credentials });
+
+// Re-use a cached pine-facade response without a network call
+const cached = parseIndicatorDefinition(rawPineFacadeResult, 'STD;RSI', 'last');
+```
+
+**`PineIndicator` properties and methods:**
+
+| Member | Description |
+|---|---|
+| `id` | Script ID, e.g. `STD;RSI`. |
+| `version` | Script version string. |
+| `description` | Full display name of the indicator. |
+| `shortDescription` | Short display name. |
+| `inputs` | Record of input definitions keyed by input ID (`in_0`, `in_1`, …). |
+| `plots` | Record mapping plot IDs to sanitised plot names. |
+| `script` | Compiled IL template sent to the chart. |
+| `type` | Study type: `'Script@tv-scripting-101!'` or `'StrategyScript@tv-scripting-101!'`. |
+| `setInput(key, value)` | Changes an input by ID (`in_0`), number (`0`), inline name, or internal ID. Validates type and allowed options. Returns `this`. |
+| `setInputs(values)` | Changes several inputs at once from a `Record<string, unknown>`. Returns `this`. |
+| `findInput(key)` | Returns the input ID for a given ID, number, inline name, or internal ID. Returns `undefined` if not found. |
+| `setType(type)` | Changes the study type, e.g. to run a strategy as `'StrategyScript@tv-scripting-101!'`. Returns `this`. |
+| `clone()` | Returns an independent copy so the same definition can run with different inputs simultaneously. |
+
+```typescript
+const rsi = await getIndicator('STD;RSI');
+
+// Find input by name, set by inline name or ID
+rsi.setInput('Length', 21);
+rsi.setInput('in_1', 'close'); // source by input ID
+rsi.setInputs({ Length: 14, Source: 'close' });
+
+// Run two RSIs with different lengths on the same chart
+const rsi14 = rsi.clone().setInput('Length', 14);
+const rsi21 = rsi.clone().setInput('Length', 21);
+const study14 = chart.createStudy(rsi14);
+const study21 = chart.createStudy(rsi21);
+```
+
+### BuiltInIndicator — `new BuiltInIndicator(type, options?)`
+
+Native TradingView studies that do not use Pine scripts. These are useful for volume, volume profile, and other built-in overlays.
+
+```typescript
+import { BuiltInIndicator } from '@mathieuc/tradingview';
+
+// Standard volume
+const volume = new BuiltInIndicator('Volume@tv-basicstudies-241');
+volume.setOption('length', 20);     // MA period
+volume.setOption('col_prev_close', true); // colour by previous close
+
+// Fixed-range volume profile
+const profile = new BuiltInIndicator('VbPFixed@tv-basicstudies-241!');
+profile.setOption('first_bar_time', Date.now() - 30 * 24 * 60 * 60 * 1000); // 30 days ago
+profile.setOption('last_bar_time', Date.now());
+```
+
+**Known types:**
+
+| Type | Description |
+|---|---|
+| `Volume@tv-basicstudies-241` | Standard volume bars with MA. |
+| `VbPFixed@tv-basicstudies-241` | Fixed-range Volume Profile (basic). |
+| `VbPFixed@tv-basicstudies-241!` | Fixed-range Volume Profile (pro). |
+| `VbPFixed@tv-volumebyprice-53!` | Fixed-range VbP (pro v53). |
+| `VbPSessions@tv-volumebyprice-53` | Session-based Volume Profile. |
+| `VbPSessionsRough@tv-volumebyprice-53!` | Rough session VbP. |
+| `VbPSessionsDetailed@tv-volumebyprice-53!` | Detailed session VbP. |
+| `VbPVisible@tv-volumebyprice-53` | Visible-range Volume Profile. |
+
+`setOption(key, value, force?)` validates the option key and value type for known types. Pass `force: true` to bypass validation for unsupported or custom option names.
+
+## Study Instance
+
+Once you call `chart.createStudy(indicator)`, you receive a `Study` instance that is an event emitter.
+
+**Instance members:**
+
+| Member | Type | Description |
+|---|---|---|
+| `values` | `StudyValue[]` | Plot rows, oldest first. Each row is `{ $time: number, <plotName>: number, … }`. Plot names come from the indicator's `plots` map. |
+| `graphics` | `GraphicsData` | Drawings produced by the script: `labels`, `lines`, `boxes`, `tables`, `polygons`, `horizLines`, `horizHists`, and `raw`. Updated after each `'graphic'` change. |
+| `strategyReport` | `StrategyReport` | Strategy backtest results (Pine strategies only). Contains `performance`, `trades`, `history`, `currency`, and `settings`. Updated incrementally as the server streams report data. |
+| `indicator` | `PineIndicator \| BuiltInIndicator` | The indicator definition currently running. |
+| `isReady` | `boolean` | `true` after the first `study_completed` packet. |
+| `isRemoved` | `boolean` | `true` after `remove()` or when the chart is gone. |
+| `setIndicator(indicator)` | `void` | Replaces the running indicator without removing and re-creating the study. Use this after changing inputs on a cloned indicator. |
+| `remove()` | `void` | Removes the study from the chart. Idempotent. |
+
+### Events
+
+| Event | Arguments | Description |
+|---|---|---|
+| `loading` | — | The server started (re-)computing the study. |
+| `ready` | — | The study finished computing over all loaded bars (`study_completed`). |
+| `update` | `changes: StudyChange[]` | New data arrived. `changes` is an array that may include: `'plots'` (plot values changed), `'graphic'` (graphics changed), `'report.perf'`, `'report.trades'`, `'report.history'`, `'report.currency'`, `'report.settings'` (strategy report parts). |
+| `error` | `error: TradingViewError` | A `STUDY_ERROR` occurred (script error, access denied, etc.). |
+
+## Strategy Reports
+
+Pine strategies expose backtest results through `study.strategyReport`. Use `summarizeStrategyReport` from the data package for a concise overview:
+
+```typescript
+import { TradingViewClient, getIndicator } from '@mathieuc/tradingview';
+import { summarizeStrategyReport } from '@mathieuc/tradingview/data';
+
+const client = new TradingViewClient({ credentials });
+const chart = client.createChart();
+chart.setMarket('BINANCE:BTCEUR', { timeframe: 'D', count: 500 });
+
+const stratDef = await getIndicator('STD;SuperTrend', { credentials });
+stratDef.setType('StrategyScript@tv-scripting-101!');
+const strategy = chart.createStudy(stratDef);
+
+strategy.on('update', (changes) => {
+  if (changes.some((c) => c.startsWith('report.'))) {
+    const summary = summarizeStrategyReport(strategy.strategyReport);
+    console.log('Net profit:', summary.closedNetProfit, summary.currency);
+    console.log('Win rate:', strategy.strategyReport.performance.all?.percentProfitable);
+  }
+});
+```
+
+**`StrategyReport` structure:**
+
+<Expandable title="StrategyReport fields">
+  <ResponseField name="currency" type="string">Currency of the reported values.</ResponseField>
+  <ResponseField name="settings" type="object">Strategy settings including date range for backtesting and trading.</ResponseField>
+  <ResponseField name="trades" type="TradeReport[]">Individual trade records, most recent first. Each trade has `entry`, `exit`, `quantity`, `profit`, `cumulative`, `runup`, and `drawdown`.</ResponseField>
+  <ResponseField name="history" type="object">Arrays of `equity`, `equityPercent`, `drawDown`, `drawDownPercent`, `buyHold`, and `buyHoldPercent` values.</ResponseField>
+  <ResponseField name="performance" type="object">Aggregate metrics: `all`, `long`, `short` sub-objects with `netProfit`, `percentProfitable`, `profitFactor`, `totalTrades`, and many more. Also `openPL`, `maxDrawDown`, `sharpeRatio`, `sortinoRatio`.</ResponseField>
+</Expandable>
+
+## Full Examples
+
+<CodeGroup>
+```typescript RSI with Custom Length
+import { TradingViewClient, getIndicator } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient({ credentials });
+const chart = client.createChart();
+
+const rsi = await getIndicator('STD;RSI', { credentials });
+rsi.setInput('Length', 21);
+
+chart.setMarket('BINANCE:BTCEUR', { timeframe: '60', count: 200 });
+const study = chart.createStudy(rsi);
+
+study.on('ready', () => {
+  const last = study.values.at(-1);
+  console.log(`RSI(21): ${last?.RSI}`);
+});
+
+study.on('update', (changes) => {
+  if (changes.includes('plots') && chart.lastCandle) {
+    const row = study.values.at(-1);
+    console.log(chart.lastCandle.close, '→', row?.RSI);
+  }
+});
+
+// Swap to RSI(14) at runtime without re-creating the study
+setTimeout(() => {
+  const rsi14 = rsi.clone().setInput('Length', 14);
+  study.setIndicator(rsi14);
+}, 10_000);
+
+setTimeout(async () => {
+  study.remove();
+  chart.delete();
+  await client.close();
+}, 20_000);
+```
+
+```typescript Volume Profile
+import { TradingViewClient, BuiltInIndicator } from '@mathieuc/tradingview';
+
+const profile = new BuiltInIndicator('VbPFixed@tv-basicstudies-241!');
+profile.setOption('first_bar_time', Date.now() - 10 ** 8); // ~1 day back
+
+const client = new TradingViewClient();
+const chart = client.createChart();
+chart.setMarket('BINANCE:BTCEUR', { timeframe: '60', count: 1 });
+
+const study = chart.createStudy(profile);
+study.on('update', async () => {
+  const rows = study.graphics.horizHists
+    .filter((h) => h.lastBarTime === 0)
+    .sort((a, b) => b.priceHigh - a.priceHigh);
+  if (!rows.length) return;
+
+  const max = Math.max(...rows.map((h) => h.rate[0] + h.rate[1]));
+  for (const h of rows) {
+    const bar = (vol: number) => '█'.repeat(Math.round((vol / max) * 40));
+    console.log(`${Math.round((h.priceHigh + h.priceLow) / 2)}: ${bar(h.rate[0])}${bar(h.rate[1])}`);
+  }
+  await client.close();
+});
+```
+</CodeGroup>
+
+<Warning>
+  Pine scripts that are invite-only or private require valid `credentials` to load via `getIndicator`. Without them, the server returns a `STUDY_ERROR` with a permission-denied message. Always pass `credentials` when loading non-public scripts.
+</Warning>

@@ -1,0 +1,280 @@
+---
+title: "Custom Transports, Proxies, and Protocol Helpers"
+sidebarTitle: "Transport"
+description: "Configure HTTP and WebSocket proxies with createProxy, implement a custom TransportFactory for testing or alternate runtimes, and use the protocol module for wire-format debugging."
+---
+
+The library's default WebSocket transport is built on the [`ws`](https://github.com/websockets/ws) npm package, which works in both Node.js and Bun. You can replace it entirely — or route it through a proxy — without changing any other part of your code. The same `transport` and `fetch` options are accepted by `TradingViewClient`, the data API `clientOptions`, and the standalone HTTP functions.
+
+```typescript
+import { createProxy, TradingViewClient } from '@mathieuc/tradingview';
+
+const proxy = createProxy('http://user:password@proxy.local:3128');
+const client = new TradingViewClient({ ...proxy, credentials });
+```
+
+## Proxy Support
+
+`createProxy(proxyUrl, options?)` returns a `{ fetch, transport }` pair that routes both HTTP requests and WebSocket connections through the same proxy. Pass the result with the spread operator to any place that accepts `fetch` or `transport`.
+
+```typescript
+import {
+  createProxy, getCandles, searchMarkets, TradingViewClient,
+} from '@mathieuc/tradingview';
+
+const proxy = createProxy(process.env.HTTPS_PROXY!);
+// e.g. http://user:password@proxy.local:3128
+
+// WebSocket connection
+const client = new TradingViewClient({ ...proxy, credentials });
+
+// HTTP data functions
+await getCandles({ symbol: 'BINANCE:BTCUSDT', clientOptions: proxy });
+await searchMarkets('BTC', { fetch: proxy.fetch });
+```
+
+### Proxy URL formats
+
+<ParamField path="proxy" type="string | URL | HttpAgent" required>
+  The proxy target. Behaviour depends on the runtime:
+
+  - **`http://` or `https://` URL** — Uses a built-in HTTP CONNECT tunnel. Basic authentication is read from the URL (`user:password@host:port`).
+  - **Node `http.Agent`** (e.g. from `socks-proxy-agent`) — Used as-is for both HTTP and WebSocket requests. Pass any custom agent this way.
+  - **Bun** — The URL string is passed to Bun's native `proxy` support. Bun 1.3.6 or later is required for WebSocket proxying.
+</ParamField>
+
+<ParamField body="tls" type="ProxyTlsOptions">
+  TLS options for connections made through the tunnel. Use `ca` to trust the certificate of a corporate HTTPS inspection proxy.
+
+  ```typescript
+  import { createProxy } from '@mathieuc/tradingview';
+  import { readFileSync } from 'node:fs';
+
+  const proxy = createProxy('https://intercept.corp.local:8080', {
+    tls: { ca: readFileSync('corp-ca.pem') },
+  });
+  ```
+</ParamField>
+
+<ParamField body="connectTimeoutMs" type="number" default="20000">
+  Time in milliseconds allowed for the proxy to open the CONNECT tunnel.
+</ParamField>
+
+### SOCKS proxy (Node only)
+
+```typescript
+import { createProxy } from '@mathieuc/tradingview';
+import { SocksProxyAgent } from 'socks-proxy-agent';
+
+const agent = new SocksProxyAgent('socks5://user:pass@localhost:1080');
+const proxy = createProxy(agent); // agent is used directly for both HTTP and WS
+```
+
+## Custom Transport
+
+To use a different WebSocket library, a mock for tests, or any other transport mechanism, implement the `TransportFactory` interface and pass it as the `transport` option.
+
+### TransportFactory interface
+
+```typescript
+import type { TransportFactory } from '@mathieuc/tradingview';
+
+const myTransport: TransportFactory = (request, handlers) => {
+  // request: { url: string, origin: string, headers: Record<string, string> }
+  // handlers: { onOpen, onMessage, onClose, onError }
+  const socket = createMySocket(request.url, {
+    origin: request.origin,
+    headers: request.headers,
+  });
+
+  socket.onopen = () => handlers.onOpen();
+  socket.onmessage = (event) => handlers.onMessage(String(event.data));
+  socket.onclose = (event) => handlers.onClose(event.code, event.reason);
+  socket.onerror = (event) => handlers.onError(new Error(String(event)));
+
+  return {
+    // Must report true only when the socket is fully open and can send.
+    get isOpen() { return socket.readyState === 1; },
+    send(data: string) { socket.send(data); },
+    // Starts a graceful close; onClose must eventually be called.
+    close() { socket.close(); },
+    // Optional: destroy without a closing handshake (unresponsive peer).
+    terminate() { socket.terminate?.(); },
+  };
+};
+
+const client = new TradingViewClient({ transport: myTransport });
+```
+
+**Handler contract:**
+
+| Handler | When to call | Arguments |
+|---|---|---|
+| `onOpen()` | Socket is open and ready to send. | — |
+| `onMessage(data)` | A text message was received. | `data: string` (UTF-8 text) |
+| `onClose(code?, reason?)` | Socket closed (cleanly or by error). Must be called exactly once. | WebSocket close code and reason string |
+| `onError(error)` | A transport-level error occurred. The client will then close the socket. | `Error` instance |
+
+**Return contract:**
+
+| Property | Type | Description |
+|---|---|---|
+| `isOpen` | `boolean` (getter) | `true` when the socket is in `OPEN` state. |
+| `send(data)` | `void` | Sends a text frame. Only called when `isOpen` is `true`. |
+| `close()` | `void` | Initiates graceful close. `onClose` must be called after this. |
+| `terminate()` | `void` (optional) | Destroys the connection immediately without a closing handshake. |
+
+### Using a custom Node agent
+
+If you only need to control the HTTP handshake (e.g. for a proxy agent) without replacing the entire transport, use `createWsTransport`:
+
+```typescript
+import { createWsTransport, TradingViewClient } from '@mathieuc/tradingview';
+import { HttpsProxyAgent } from 'https-proxy-agent';
+
+const transport = createWsTransport({
+  agent: new HttpsProxyAgent('https://proxy.example.com:8080'),
+});
+
+const client = new TradingViewClient({ transport });
+```
+
+### Test transport (fake server)
+
+The transport abstraction is designed to let tests run without network access. Pass a `TransportFactory` that simulates server responses:
+
+```typescript
+import type { TransportFactory } from '@mathieuc/tradingview';
+import { protocol } from '@mathieuc/tradingview';
+
+const fakeServer: TransportFactory = (_request, handlers) => {
+  const queue: string[] = [];
+  let open = false;
+
+  // Open asynchronously, like a real socket
+  queueMicrotask(() => {
+    open = true;
+    handlers.onOpen();
+    // Send server greeting
+    handlers.onMessage(
+      protocol.encodePacket('', [{ session_id: 'test', release: '0', protocol: 'json' }])
+        .replace('"m":""', '')
+    );
+  });
+
+  return {
+    get isOpen() { return open; },
+    send(data) { queue.push(data); },
+    close() {
+      open = false;
+      handlers.onClose(1000, 'Normal closure');
+    },
+  };
+};
+
+const client = new TradingViewClient({ transport: fakeServer });
+```
+
+## Protocol Helpers
+
+The `protocol` namespace exposes the TradingView wire format. Import it from the root package:
+
+```typescript
+import { protocol } from '@mathieuc/tradingview';
+```
+
+### `protocol.encodePacket(method, params?)`
+
+Encodes a client packet as a framed WebSocket message.
+
+```typescript
+protocol.encodePacket('set_auth_token', ['my_token']);
+// → '~m~45~m~{"m":"set_auth_token","p":["my_token"]}'
+
+protocol.encodePacket('quote_create_session', ['qs_Ab12Cd34']);
+// → '~m~49~m~{"m":"quote_create_session","p":["qs_Ab12Cd34"]}'
+```
+
+### `protocol.decodeFrames(rawMessage)`
+
+Decodes a raw WebSocket message string into an array of frames. Handles multiple frames in one message, heartbeats, JSON packets, and malformed input.
+
+```typescript
+const frames = protocol.decodeFrames(rawMessage);
+// frames: Array<Frame>
+// Frame types:
+//   { type: 'heartbeat', id: number }    – echo with encodeHeartbeat(id)
+//   { type: 'packet', packet: { m, p } } – method packet
+//   { type: 'data', data: unknown }      – JSON that is not a packet (e.g. server greeting)
+//   { type: 'invalid', raw, error }      – unparseable payload
+
+for (const frame of frames) {
+  if (frame.type === 'packet') console.log(frame.packet.m, frame.packet.p);
+  if (frame.type === 'heartbeat') console.log('Heartbeat:', frame.id);
+}
+```
+
+### `protocol.decodeCompressed(base64)`
+
+Decodes a strategy report `dataCompressed` payload. TradingView sends large backtest results as base64-encoded data that may be a ZIP archive, zlib stream, raw deflate, gzip, or plain JSON. `decodeCompressed` tries all formats and returns the parsed JSON.
+
+```typescript
+const report = protocol.decodeCompressed(payload.dataCompressed);
+// → parsed strategy report object
+```
+
+URL-safe and unpadded base64 are handled automatically by `protocol.normaliseBase64`.
+
+### `protocol.createSessionId(prefix)`
+
+Creates a random session ID in TradingView's format (`<prefix>_<12 random chars>`), suitable for `chart_create_session`, `quote_create_session`, and similar commands.
+
+```typescript
+protocol.createSessionId('cs'); // → 'cs_Ab12Cd34Ef56'
+protocol.createSessionId('qs'); // → 'qs_Xy78Mn90Pq12'
+protocol.createSessionId('rs'); // → 'rs_Zz00Aa11Bb22'
+```
+
+### Frame format
+
+Every WebSocket message contains one or more frames with the format:
+
+```text
+~m~<length>~m~<payload>
+```
+
+where `<length>` is the number of UTF-16 code units in `<payload>` (JavaScript's `String.length`). A single message can concatenate multiple frames.
+
+Heartbeat frames use a different format and must be echoed back:
+
+```text
+~h~<id>        (server sends)
+~m~8~m~~h~42   (client echoes)
+```
+
+The client handles heartbeats automatically. You only need these helpers for low-level debugging or when building a custom client from scratch.
+
+## Protocol Debugging Example
+
+```typescript
+import { TradingViewClient, protocol } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient({
+  debug(prefix, raw) {
+    if (prefix === 'send') {
+      const [frame] = protocol.decodeFrames(raw);
+      if (frame.type === 'packet') console.log('→', frame.packet.m, frame.packet.p);
+    } else if (prefix === 'packet') {
+      console.log('←', (raw as any).m, (raw as any).p);
+    }
+  },
+});
+
+await client.ready;
+
+// Manually encode a raw command (escape hatch)
+const raw = protocol.encodePacket('chart_create_session', ['cs_test_1234']);
+console.log('Encoded:', raw);
+
+await client.close();
+```

@@ -1,0 +1,128 @@
+---
+title: "Data API Overview: Managed Connections and One-Shot Functions"
+sidebarTitle: "Overview"
+description: "The @mathieuc/tradingview/data entry point provides one-shot functions and watchers for candles, quotes, indicators, and more — with automatic connection management."
+---
+
+The Data API is the simplest way to use `@mathieuc/tradingview` in any application. Import from `@mathieuc/tradingview/data`, or use the re-exports from the root `@mathieuc/tradingview` package — both are equivalent. Every function opens what it needs, waits for complete data, and releases every WebSocket session (and the connection it opened) before returning. This cleanup happens on normal completion, errors, timeouts, and cancellation alike, so you never need to manage connections yourself for one-shot use.
+
+```typescript
+import { getCandles, watchQuotes } from '@mathieuc/tradingview/data';
+// or equivalently:
+import { getCandles, watchQuotes } from '@mathieuc/tradingview';
+```
+
+## Exported functions
+
+| Function | Description |
+|---|---|
+| `getCandles(query, provider?)` | Fetch OHLCV candle history, oldest first |
+| `watchCandles(query, handlers, provider?)` | Stream live candle snapshots |
+| `getQuote(query)` | Fetch the current quote for one symbol |
+| `getQuotes(query)` | Fetch current quotes for multiple symbols |
+| `watchQuotes(query, handlers)` | Stream live quote updates |
+| `getSymbolInfo(query)` | Fetch symbol metadata (exchange, currency, session…) |
+| `getIndicatorData(query)` | Compute indicator values, drawings, and strategy report |
+| `watchIndicator(query, handlers)` | Stream live indicator results |
+| `getScreener(query, options?)` | Run a one-shot market scan with filters and ranking |
+| `getHotlist(query, options?)` | Fetch scanner-ranked gainers, losers, and volume lists |
+| `getWatchlists(options)` | Read account watchlists (credentials required) |
+| `searchMarkets(text, options?)` | Search TradingView markets by keyword |
+| `searchIndicators(text, options?)` | Search built-in and community Pine indicators |
+| `getTechnicalAnalysis(symbol, options?)` | Fetch multi-timeframe technical analysis ratings |
+
+## Connection options
+
+WebSocket data functions (`getCandles`, `watchCandles`, `getQuote`, `getQuotes`, `watchQuotes`, `getIndicatorData`, `watchIndicator`, `getSymbolInfo`) all accept a shared set of connection and lifecycle options.
+
+<ParamField body="timeoutMs" type="number" default="15000">
+  Maximum wait in milliseconds. For one-shot functions this covers the entire call. For watchers it covers the period until the initial data arrives. Rejects with a `TIMEOUT` error when exceeded. Raise this value when loading deep history.
+</ParamField>
+
+<ParamField body="signal" type="AbortSignal">
+  An `AbortSignal` from `AbortController` or `AbortSignal.timeout()`. Aborting rejects the call with `ABORTED`, or stops a running watcher.
+</ParamField>
+
+<ParamField body="credentials" type="{ session: string; signature: string }">
+  Your TradingView account cookies (`sessionid` and `sessionid_sign`). Required for Pine scripts, private indicators, and account-gated data. See [Authentication](/authentication) for how to obtain these values. Always store credentials in environment variables — never hard-code them.
+</ParamField>
+
+<ParamField body="clientOptions" type="object">
+  Options forwarded to the `TradingViewClient` opened by this call (`server`, `transport`, `debug`, `fetch`…). Ignored when `client` is provided.
+</ParamField>
+
+<ParamField body="client" type="TradingViewClient">
+  Reuse an already-open `TradingViewClient`. The call removes only its own sessions and leaves the connection open when finished. This is the most efficient approach when making many calls in sequence or in parallel.
+</ParamField>
+
+### Shared client example
+
+When making multiple calls at once, share a single `TradingViewClient` to avoid opening multiple connections:
+
+```typescript
+import { TradingViewClient, getCandles, getQuote } from '@mathieuc/tradingview';
+
+const credentials = {
+  session: process.env.TV_SESSION!,
+  signature: process.env.TV_SIGNATURE!,
+};
+
+const client = new TradingViewClient({ credentials });
+try {
+  const [candles, quote] = await Promise.all([
+    getCandles({ symbol: 'BINANCE:BTCUSDT', timeframe: '60', count: 200, client }),
+    getQuote({ symbol: 'BINANCE:BTCUSDT', client }),
+  ]);
+  console.log('Last close:', candles.at(-1)?.close);
+  console.log('Live price:', quote.lp);
+} finally {
+  await client.close();
+}
+```
+
+<Note>
+  Keep credentials in environment variables or a secret store. Never commit them to source files, issues, or prompts.
+</Note>
+
+## Alternate candle providers
+
+The V4 data API supports alternative candle data sources through the `MarketDataProvider` interface. This lets you swap TradingView out for any other data backend while keeping the same `getCandles` / `watchCandles` call signatures.
+
+To create a custom provider, implement `MarketDataProvider.watchCandles(query, handlers)`. The worker it returns must expose `latest` (the most recent snapshot) and an idempotent `stop()` method. The provider controls its own network access and must resolve only after its first usable snapshot is available.
+
+Pass the provider as the second argument to `getCandles` or the third argument to `watchCandles`:
+
+```typescript
+import { getCandles, watchCandles, type MarketDataProvider } from '@mathieuc/tradingview/data';
+
+declare const myProvider: MarketDataProvider;
+
+// One-shot snapshot via custom provider
+const candles = await getCandles({ symbol: 'CUSTOM:ASSET', timeframe: 'D' }, myProvider);
+
+// Streaming via custom provider
+const watcher = await watchCandles(
+  { symbol: 'CUSTOM:ASSET', timeframe: '1' },
+  { onData: (candles) => console.log(candles.at(-1)) },
+  myProvider,
+);
+```
+
+`TradingViewProvider` is also exported and implements the same contract with default connection options. The regular `getCandles(query)` and `watchCandles(query, handlers)` calls (without a provider argument) use TradingView directly — no provider setup needed.
+
+## Explore the Data API
+
+<CardGroup cols={2}>
+  <Card title="Candles" icon="chart-candlestick" href="/data-api/candles">
+    Fetch OHLCV history and stream live bar updates with `getCandles` and `watchCandles`.
+  </Card>
+  <Card title="Quotes" icon="dollar-sign" href="/data-api/quotes">
+    Get last price, bid, ask, volume, and change with `getQuote`, `getQuotes`, and `watchQuotes`.
+  </Card>
+  <Card title="Indicators" icon="chart-line" href="/data-api/indicators">
+    Run Pine indicators and strategy backtests with `getIndicatorData` and `watchIndicator`.
+  </Card>
+  <Card title="Screener" icon="filter" href="/data-api/screener">
+    Scan markets with custom columns, filters, and sorting using `getScreener` and `getHotlist`.
+  </Card>
+</CardGroup>

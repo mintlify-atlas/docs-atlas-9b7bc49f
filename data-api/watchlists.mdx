@@ -1,0 +1,122 @@
+---
+title: "Read TradingView Account Watchlists and Ranked Lists"
+sidebarTitle: "Watchlists"
+description: "Use getWatchlists to fetch your TradingView account watchlists, and getHotlist for scanner-ranked gainers, losers, and volume lists."
+---
+
+`getWatchlists` reads the watchlists associated with a TradingView account. It is a read-only, one-shot HTTP call — no WebSocket session is opened. Valid credentials are required; the function will never create, rename, reorder, or delete any list.
+
+## getWatchlists
+
+```typescript
+import { getWatchlists } from '@mathieuc/tradingview/data';
+
+const lists = await getWatchlists({
+  credentials: {
+    session: process.env.TV_SESSION!,
+    signature: process.env.TV_SIGNATURE!,
+  },
+});
+
+for (const list of lists) {
+  console.log(list.id, list.name, list.symbols);
+}
+```
+
+### Options
+
+<ParamField body="credentials" type="{ session: string; signature: string }" required>
+  Your TradingView account cookies (`sessionid` and `sessionid_sign`). Required — anonymous access is not supported. See [Authentication](/authentication) for how to obtain these values. Keep credentials in environment variables.
+</ParamField>
+
+<ParamField body="fetch" type="function">
+  Custom `fetch` implementation to use for the HTTP request. Defaults to the global `fetch`.
+</ParamField>
+
+<ParamField body="headers" type="Record<string, string>">
+  Additional HTTP headers to include with the request.
+</ParamField>
+
+<ParamField body="signal" type="AbortSignal">
+  An `AbortSignal` to cancel the request.
+</ParamField>
+
+### Return type: Watchlist[]
+
+Returns an array of watchlist objects, one per list on the account.
+
+<ResponseField name="id" type="number">
+  Numeric ID of the watchlist as assigned by TradingView.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Display name of the watchlist (e.g. `"My Portfolio"`, `"Crypto Watchlist"`).
+</ResponseField>
+
+<ResponseField name="symbols" type="string[]">
+  Ordered array of entries as stored by TradingView. Most entries are exchange-qualified symbols (`'NASDAQ:AAPL'`, `'BINANCE:BTCUSDT'`), but the array can also contain **section marker strings** used to group symbols in the TradingView UI.
+</ResponseField>
+
+Additional upstream metadata fields beyond `id`, `name`, and `symbols` are preserved without coercion under their original keys.
+
+### Code example
+
+```typescript
+import { getWatchlists, getQuotes } from '@mathieuc/tradingview/data';
+
+const credentials = {
+  session: process.env.TV_SESSION!,
+  signature: process.env.TV_SIGNATURE!,
+};
+
+const lists = await getWatchlists({ credentials });
+
+for (const list of lists) {
+  console.log(`\n=== ${list.name} (${list.symbols.length} entries) ===`);
+
+  // Filter out section markers before using symbols in other API calls.
+  // A valid exchange-qualified symbol always contains a colon.
+  const symbols = list.symbols.filter((s) => s.includes(':'));
+
+  if (symbols.length === 0) {
+    console.log('  (empty or only section markers)');
+    continue;
+  }
+
+  const quotes = await getQuotes({ symbols, credentials, fields: ['lp', 'chp'] });
+  for (const [symbol, quote] of Object.entries(quotes)) {
+    console.log(`  ${symbol}: ${quote.lp} (${quote.chp}%)`);
+  }
+}
+```
+
+<Warning>
+  The `symbols` array in each watchlist can contain **section marker strings** alongside exchange-qualified tickers. Do not pass the raw `symbols` array directly to `getQuotes` or other functions that expect valid ticker symbols. Filter for entries that contain a colon (`':'`), or apply your own validation, before using them as symbols elsewhere.
+</Warning>
+
+### Error codes
+
+| Code | Meaning |
+|---|---|
+| `AUTH_ERROR` | Credentials were rejected — the server returned HTTP 401, 403, or a redirect (login page). |
+| `HTTP_ERROR` | The response was malformed or an unexpected HTTP status was returned. |
+| `INVALID_ARGUMENT` | `credentials.session` was not provided. |
+
+---
+
+## getHotlist
+
+`getHotlist` returns scanner-ranked lists of US equity symbols — top gainers, losers, most-active, or volume gainers. It is documented in full on the [Screener](/data-api/screener#gethotlist) page since it is a convenience wrapper around `getScreener`.
+
+```typescript
+import { getHotlist } from '@mathieuc/tradingview/data';
+
+const page = await getHotlist({ kind: 'gainers', range: [0, 10] });
+console.log(page.rows);
+```
+
+Accepted `kind` values: `'gainers'`, `'losers'`, `'mostActive'`, `'volumeGainers'`. See [Screener → getHotlist](/data-api/screener#gethotlist) for the full option reference and examples.
+
+<Note>
+  This API is **read-only**. `getWatchlists` will never create, edit, reorder, or delete any watchlist or symbol. Treat the returned names and symbols as private account data.
+</Note>

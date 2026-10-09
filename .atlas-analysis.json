@@ -1,0 +1,119 @@
+{
+  "projectType": "sdk-library",
+  "projectName": "TradingView-API",
+  "projectDescription": "An independent community TypeScript/JavaScript library for accessing TradingView market data — candles, quotes, indicators, strategies, and screeners — over WebSocket and HTTP.",
+  "theme": "luma",
+  "primaryColor": "#848484",
+  "lightColor": "#151515",
+  "darkColor": "#d8d8d8",
+  "navigation": {
+    "tabs": [
+      {
+        "tab": "Documentation",
+        "groups": [
+          {
+            "group": "Get Started",
+            "pages": [
+              "introduction",
+              "quickstart",
+              "authentication"
+            ]
+          },
+          {
+            "group": "Data API",
+            "pages": [
+              "data-api/overview",
+              "data-api/candles",
+              "data-api/quotes",
+              "data-api/indicators",
+              "data-api/screener",
+              "data-api/watchlists",
+              "data-api/search"
+            ]
+          },
+          {
+            "group": "Low-Level API",
+            "pages": [
+              "low-level/client",
+              "low-level/charts",
+              "low-level/studies",
+              "low-level/quotes",
+              "low-level/http-functions",
+              "low-level/transport"
+            ]
+          },
+          {
+            "group": "Guides",
+            "pages": [
+              "guides/examples",
+              "guides/errors",
+              "guides/migration-v3-to-v4"
+            ]
+          }
+        ]
+      }
+    ]
+  },
+  "keyFeatures": [
+    "High-level data API: one-shot getCandles/getQuote/getIndicatorData and watcher variants",
+    "Real-time WebSocket streaming for candles, quotes and indicators",
+    "Low-level client with full chart session and study control",
+    "Replay mode for backtesting strategies at any historical point",
+    "Custom chart types: Heikin Ashi, Renko, Kagi, Point & Figure, Range",
+    "Stock screener with filters, sorting and pagination",
+    "Account authentication via session cookies with optional proxy support",
+    "Pine indicator support (built-in, community, private) with input validation",
+    "Strategy report decoding with performance, trades and equity history",
+    "TypeScript-first with full type declarations; ESM with Node ≥ 20 and Bun support"
+  ],
+  "publicApiSurface": [
+    "getCandles(query, provider?)",
+    "watchCandles(query, handlers, provider?)",
+    "getQuote(symbol, options?)",
+    "getQuotes(query, options?)",
+    "watchQuotes(query, handlers, options?)",
+    "getSymbolInfo(query, options?)",
+    "getIndicatorData(query, options?)",
+    "watchIndicator(query, handlers, options?)",
+    "getScreener(query, options?)",
+    "getHotlist(query, options?)",
+    "getWatchlists(options)",
+    "searchMarkets(text, options?)",
+    "searchIndicators(text, options?)",
+    "getTechnicalAnalysis(symbol, options?)",
+    "TradingViewClient(options?)",
+    "client.createChart()",
+    "client.createQuoteSession(options?)",
+    "client.close()",
+    "chart.setMarket(symbol, options?)",
+    "chart.setTimeframe(timeframe)",
+    "chart.fetchMore(count)",
+    "chart.createStudy(indicator)",
+    "chart.replayStep(speed?)",
+    "chart.replayStart(speed?)",
+    "chart.replayStop()",
+    "chart.delete()",
+    "getIndicator(id, options?)",
+    "PineIndicator.setInput(key, value)",
+    "PineIndicator.setInputs(values)",
+    "PineIndicator.clone()",
+    "new BuiltInIndicator(type, options?)",
+    "study.setIndicator(indicator)",
+    "study.remove()",
+    "summarizeStrategyReport(report)",
+    "createProxy(proxyUrl)",
+    "loginUser(options)",
+    "getUser(credentials, options?)",
+    "getChartToken(layoutId, options?)",
+    "getDrawings(layoutId, options?)",
+    "new PinePermissionManager(pineId, options?)",
+    "getPrivateIndicators(credentials)",
+    "parseIndicatorDefinition(result, id, version)",
+    "TradingViewProvider",
+    "TradingViewError",
+    "protocol.encodePacket(method, params)",
+    "protocol.decodeFrames(raw)",
+    "protocol.decodeCompressed(base64)",
+    "protocol.createSessionId(prefix)"
+  ]
+}

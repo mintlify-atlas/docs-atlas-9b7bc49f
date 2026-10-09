@@ -1,20 +1,105 @@
 ---
-title: "Introduction"
-description: "Welcome to your project"
+title: "TradingView-API: Market Data for JavaScript & TypeScript"
+sidebarTitle: "Home"
+description: "An independent community library for accessing TradingView market data — candles, quotes, indicators, strategies, and screeners — over WebSocket and HTTP."
 ---
 
-Write a short description of your product here. What it does, who it's for, and what they can accomplish with it.
+TradingView-API (`@mathieuc/tradingview`) is a community-built TypeScript/JavaScript library that gives you programmatic access to TradingView market data: OHLCV candles, real-time quotes, Pine indicator values, strategy reports, and symbol screeners. It works in Node.js ≥ 20 and Bun, over WebSocket and HTTP — no official TradingView API key required.
 
-<Tip>
-  Ready to make this your own? Start by editing this page. Update your `docs.json` file to customize your site. Then fill out the [Quickstart](/quickstart) page.
-</Tip>
+<CardGroup cols={2}>
+  <Card title="Quickstart" icon="bolt" href="/quickstart">
+    Fetch your first candles in under 5 minutes with no account required.
+  </Card>
+  <Card title="Authentication" icon="key" href="/authentication">
+    Use your TradingView session cookies to unlock Pine scripts and full history.
+  </Card>
+  <Card title="Data API" icon="database" href="/data-api/overview">
+    High-level one-shot functions and watchers — connections managed for you.
+  </Card>
+  <Card title="Low-Level API" icon="code" href="/low-level/client">
+    Full control: manage sessions, replay mode, and raw protocol access directly.
+  </Card>
+</CardGroup>
 
-<Card title="Quickstart" icon="rocket" href="/quickstart">
-  This card links to the quickstart page in your project.
-</Card>
-<Card title="Components" icon="puzzle-piece" href="https://mintlify.com/docs/components">
-  Add cards, callouts, steps, tabs, and more to design and structure your pages.
-</Card>
-<Card title="Settings" icon="gear" href="https://mintlify.com/docs/organize/settings">
-  Set your site name, branding, and navigation in the `docs.json` file.
-</Card>
+## What you can build
+
+The library covers the full market-data surface available through TradingView's WebSocket and HTTP endpoints:
+
+<CardGroup cols={3}>
+  <Card title="Candles" icon="chart-candlestick" href="/data-api/candles">
+    OHLCV bars, deep history, date ranges, Heikin Ashi, Renko, and more.
+  </Card>
+  <Card title="Quotes" icon="arrow-trend-up" href="/data-api/quotes">
+    Last price, bid/ask, volume, and change — live or one-shot.
+  </Card>
+  <Card title="Indicators" icon="wave-pulse" href="/data-api/indicators">
+    Built-in, community, and private Pine scripts with strategy reports.
+  </Card>
+  <Card title="Screener" icon="filter" href="/data-api/screener">
+    Scan markets with custom columns, filters, and sorting.
+  </Card>
+  <Card title="Watchlists" icon="list" href="/data-api/watchlists">
+    Read your TradingView account watchlists and ranked hotlists.
+  </Card>
+  <Card title="Search" icon="magnifying-glass" href="/data-api/search">
+    Find symbols, indicators, and technical analysis ratings.
+  </Card>
+</CardGroup>
+
+## Get started in one line
+
+```bash
+npm install @mathieuc/tradingview
+```
+
+```typescript
+import { getCandles } from '@mathieuc/tradingview/data';
+
+const candles = await getCandles({ symbol: 'BINANCE:BTCUSDT', timeframe: 'D', count: 40 });
+console.log(candles.at(-1)); // { time, open, high, low, close, volume }
+```
+
+<Note>
+  TradingView-API is an **independent community project** — it is not affiliated with or endorsed by TradingView. Always check your data provider's terms and applicable market-data permissions for your use case.
+</Note>
+
+## Two ways to use the library
+
+<Tabs>
+  <Tab title="Data API (recommended)">
+    Import from `@mathieuc/tradingview/data` for a simple, managed interface. Every function opens its own connection, collects the data, and cleans up — including on errors, timeouts, and cancellation.
+
+    ```typescript
+    import { getCandles, getQuote, getIndicatorData } from '@mathieuc/tradingview/data';
+
+    const candles = await getCandles({ symbol: 'NASDAQ:AAPL', timeframe: '60', count: 200 });
+    const quote   = await getQuote('NASDAQ:AAPL');
+    const rsi     = await getIndicatorData({ symbol: 'NASDAQ:AAPL', indicator: 'STD;RSI' });
+    ```
+  </Tab>
+  <Tab title="Low-Level API">
+    Import from `@mathieuc/tradingview` for full control. Manage one persistent connection with multiple chart and quote sessions, replay mode, and raw packet access.
+
+    ```typescript
+    import { TradingViewClient, getIndicator } from '@mathieuc/tradingview';
+
+    const client = new TradingViewClient();
+    const chart  = client.createChart();
+
+    chart.on('update', () => console.log(chart.lastCandle?.close));
+    chart.setMarket('BINANCE:BTCUSDT', { timeframe: '60', count: 300 });
+
+    await client.close();
+    ```
+  </Tab>
+</Tabs>
+
+## Interactive quick-start
+
+Run the interactive launcher from your project directory to get a working example without writing any code:
+
+```bash
+npx @mathieuc/tradingview
+```
+
+The launcher can open a hosted market-watcher, start a local coding agent (Claude Code or Codex), print a ready-to-use prompt, or install the library — your choice.

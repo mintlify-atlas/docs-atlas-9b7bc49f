@@ -1,0 +1,168 @@
+---
+title: "Authenticate with Your TradingView Session Cookies"
+sidebarTitle: "Authentication"
+description: "Pass your TradingView sessionid and sessionid_sign cookies as credentials to access Pine scripts, private indicators, extended history, and account watchlists."
+---
+
+The library authenticates using your TradingView **session cookies**, not an API key. When you log in to TradingView in a browser, two cookies are set — `sessionid` and `sessionid_sign` — and you can paste those values into your environment variables to give the library access to everything your TradingView account can see. Anonymous access is sufficient for candles, built-in studies, quotes, and the screener, but Pine script indicators, private indicators, extended intraday history, and account watchlists all require valid credentials.
+
+## Getting your credentials
+
+### Finding your cookies in browser DevTools
+
+1. Open [tradingview.com](https://www.tradingview.com) and sign in to your account.
+2. Open DevTools (`F12` or `Cmd+Option+I`), then go to **Application → Storage → Cookies → https://www.tradingview.com**.
+3. Find the row named **`sessionid`** and copy its value.
+4. Find the row named **`sessionid_sign`** and copy its value.
+
+Both values are long strings of letters and numbers. You need both for full authenticated access (`signature` is technically optional, but omitting it may cause some endpoints to reject the session).
+
+<Warning>
+  Never commit your `sessionid` or `sessionid_sign` values to a source file, git repository, issue tracker, chat log, or AI prompt. Anyone with these values can access your TradingView account. If a value is exposed, log out of all sessions in your TradingView account settings to invalidate it immediately.
+</Warning>
+
+### Storing credentials as environment variables
+
+Create a `.env` file in your project root (and add it to `.gitignore`):
+
+```bash .env
+TV_SESSION=your_sessionid_value_here
+TV_SIGNATURE=your_sessionid_sign_value_here
+```
+
+Load the file when you run your script with Node's built-in `--env-file` flag:
+
+```bash
+node --env-file=.env my-script.mjs
+```
+
+Then read the values at runtime:
+
+```typescript
+const session   = process.env.TV_SESSION!;
+const signature = process.env.TV_SIGNATURE!;
+```
+
+## Passing credentials to the Data API
+
+Every WebSocket data function (`getCandles`, `watchCandles`, `getIndicatorData`, `watchIndicator`, `getQuote`, `watchQuotes`, etc.) accepts a `credentials` option. Pass the object once; the library handles authentication with TradingView's server automatically.
+
+```typescript
+import { getCandles, getIndicatorData, watchCandles } from '@mathieuc/tradingview/data';
+
+const credentials = {
+  session:   process.env.TV_SESSION!,
+  signature: process.env.TV_SIGNATURE!,
+};
+
+// Extended intraday history (requires account)
+const candles = await getCandles({
+  symbol: 'BINANCE:BTCUSDT',
+  timeframe: '1',
+  count: 20_000,
+  credentials,
+});
+
+// Pine script indicator (requires account)
+const rsi = await getIndicatorData({
+  symbol:    'BINANCE:BTCUSDT',
+  timeframe: '60',
+  indicator: 'STD;RSI',
+  inputs:    { Length: 21 },
+  credentials,
+});
+
+console.log(rsi.values.at(-1)); // { $time: ..., RSI: 54.2 }
+
+// Live candle watcher with credentials
+const watcher = await watchCandles(
+  { symbol: 'BINANCE:BTCUSDT', timeframe: '1', credentials },
+  { onData: (candles) => console.log(candles.at(-1)?.close) },
+);
+await watcher.stop();
+```
+
+## Passing credentials to the Low-Level Client
+
+When using `TradingViewClient` directly, pass `credentials` in the constructor options. The client loads the account (including the WebSocket auth token) automatically before the first chart or quote session is created.
+
+```typescript
+import { TradingViewClient, getIndicator } from '@mathieuc/tradingview';
+
+const credentials = {
+  session:   process.env.TV_SESSION!,
+  signature: process.env.TV_SIGNATURE!,
+};
+
+const client = new TradingViewClient({ credentials });
+
+const chart = client.createChart();
+chart.on('update', () => console.log(chart.lastCandle?.close));
+chart.setMarket('BINANCE:BTCUSDT', { timeframe: '60', count: 300 });
+
+// Run a Pine indicator on the authenticated connection
+const supertrend = chart.createStudy(await getIndicator('STD;Supertrend'));
+supertrend.on('update', () => console.log(supertrend.values.at(-1)));
+
+// Always close the client when finished
+await client.close();
+```
+
+If you already have the WebSocket auth token (from `getUser` — see [Programmatic login](#programmatic-login) below), you can pass it directly as `authToken` to skip the initial account page fetch:
+
+```typescript
+import { TradingViewClient } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient({
+  credentials: { session, signature },
+  authToken: myAuthToken, // Skip the getUser HTTP lookup
+});
+```
+
+## Programmatic login (`loginUser`)
+
+If you prefer to authenticate with a username and password rather than copying cookies manually, use `loginUser`. It POSTs your credentials to TradingView's sign-in endpoint and returns a `User` object that includes the `session` and `signature` cookies.
+
+```typescript
+import { loginUser } from '@mathieuc/tradingview';
+
+const user = await loginUser({
+  username: 'your_username_or_email',
+  password: 'your_password',
+  remember: true, // Keep the session alive longer (default: true)
+});
+
+console.log('Signed in as', user.username, `(id ${user.id})`);
+console.log('session:  ', user.session);
+console.log('signature:', user.signature);
+
+// Store these values in your .env and use them from now on:
+// TV_SESSION=<user.session>
+// TV_SIGNATURE=<user.signature>
+```
+
+The returned `User` object also contains `authToken` (the WebSocket auth token), `privateChannel`, `sessionHash`, and profile fields (`firstName`, `lastName`, `reputation`, `followers`, `following`).
+
+<Warning>
+  `loginUser` does **not** support accounts protected by two-factor authentication (2FA) or CAPTCHA challenges. If your account has 2FA enabled, copy the cookies from your browser instead (see [Getting your credentials](#getting-your-credentials) above).
+</Warning>
+
+## What requires an account?
+
+| Feature | Anonymous | Account required |
+| --- | :---: | :---: |
+| Daily, weekly, monthly candles | ✅ Full history | — |
+| Intraday candles (1 min, 5 min, 15 min…) | ✅ ~7 000 bars | ✅ Extended history |
+| Built-in studies (Volume, MACD via study type) | ✅ | — |
+| Quotes (last price, change, bid/ask, volume) | ✅ | — |
+| Stock & crypto screener | ✅ | — |
+| Pine script indicators (`STD;RSI`, `PUB;xxxx`) | ❌ | ✅ |
+| Private indicators (`USER;xxxx`) | ❌ | ✅ |
+| Pre-market / extended quote sessions | ❌ | ✅ |
+| Account watchlists (`getWatchlists`) | ❌ | ✅ |
+
+Without credentials, TradingView rejects Pine script requests with a `STUDY_ERROR` ("maximum number of studies per chart"). Pass `credentials` to resolve it.
+
+<Note>
+  All WebSocket data functions also accept `timeoutMs` (default 15 000 ms), `signal` (an `AbortSignal` for cancellation), and `client` (a shared `TradingViewClient` to reuse an existing connection across multiple calls). See the [Data API overview](/data-api/overview) for the complete connection options reference.
+</Note>

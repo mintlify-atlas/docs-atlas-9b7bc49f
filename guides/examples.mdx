@@ -1,0 +1,141 @@
+---
+title: "Runnable Code Examples for TradingView-API"
+sidebarTitle: "Examples"
+description: "Browse runnable JavaScript examples for every TradingView-API feature: candles, quotes, indicators, screener, replay, strategy reports, drawings, and more."
+---
+
+The repository ships a full `examples/` directory. Each file is a self-contained Node.js script that demonstrates a specific area of the API — from a simple candle fetch to full replay mode with indicators. Build the library once, then run any script directly with Node or Bun without any additional tooling.
+
+## Building and Running
+
+<Steps>
+  <Step title="Install dependencies and build">
+    ```bash
+    npm ci && npm run build
+    ```
+  </Step>
+  <Step title="Run any example">
+    ```bash
+    # Anonymous — no account required
+    node examples/candles.js
+    bun examples/candles.js
+
+    # Examples that need TradingView credentials
+    node --env-file=.env examples/indicator-data.js
+    bun examples/indicator-data.js   # Bun loads .env automatically
+    ```
+  </Step>
+</Steps>
+
+## Credential Setup
+
+Examples that access Pine indicators, strategy reports, or private data read two environment variables from a `.env` file. Copy `.env.sample` and fill in your TradingView browser cookies:
+
+```bash
+SESSION=...    # Your sessionid cookie
+SIGNATURE=...  # Your signature cookie
+```
+
+<Warning>
+  Never commit `.env` to version control. Both values are live session cookies that grant full access to your TradingView account.
+</Warning>
+
+To get these values, log in to TradingView in your browser, open DevTools → Application → Cookies, and copy the `sessionid` and `sessionid_sign` values.
+
+## Example Index
+
+Every example in the repository is listed below. The **Account** column indicates whether a free anonymous session is enough, or whether you need to be logged in.
+
+| Example | API | Account required |
+|---|---|---|
+| `candles.js` | `getCandles` (count, from/to) | No |
+| `watch-candles.js` | `watchCandles` | No |
+| `quotes.js` | `getQuote`, `getQuotes`, `watchQuotes` | No |
+| `indicator-data.js` | `getIndicatorData` | Pine scripts only |
+| `screener.js` | `getScreener` (filters, columns, ranking) | No |
+| `search.js` | `searchMarkets`, `searchIndicators`, `getTechnicalAnalysis` | No |
+| `custom-chart-types.js` | Heikin Ashi, Renko, Line Break, Kagi, P&F, Range | No |
+| `errors.js` | `TradingViewError` codes | Partly |
+| `simple-chart.js` | `TradingViewClient`, `ChartSession` | No |
+| `quote-session.js` | `QuoteSession` | No |
+| `builtin-indicator.js` | `BuiltInIndicator`, study graphics | No |
+| `fake-replay.js` | Negative counts and `fetchMore` | No |
+| `strategy-report.js` | Public strategy → trade records → closed/open PnL summary | Yes (Basic) |
+| `replay.js` | Replay mode with studies | Pine studies only |
+| `custom-timeframe.js` | Second-based timeframes | Yes |
+| `from-to.js` | Reference times and ranges | Yes |
+| `graphic-indicator.js` | Labels, lines, boxes, tables | Yes |
+| `multiple-indicators.js` | Shared connection | Yes |
+| `private-indicators.js` | `getPrivateIndicators` | Yes |
+| `drawings.js` | `getDrawings` | Private layouts |
+| `pine-permissions.js` | `PinePermissionManager` | Yes (script owner) |
+| `user-login.js` | `loginUser`, `getUser` | Username/password |
+
+## Candles Example
+
+`examples/candles.js` shows the two most common ways to request historical bars: a fixed count of the most recent candles, and a date-bounded range. Both return bars oldest-first and release all resources automatically when the `await` resolves.
+
+```javascript
+// One-shot candles with the high-level data API.
+// Run: npm run build && node examples/candles.js [SYMBOL] [TIMEFRAME]
+import { getCandles } from '@mathieuc/tradingview/data';
+
+const symbol = process.argv[2] ?? 'BINANCE:BTCUSDT';
+const timeframe = process.argv[3] ?? 'D';
+
+// The 100 most recent bars, oldest first. Resources are released automatically.
+const candles = await getCandles({ symbol, timeframe, count: 100 });
+const last = candles.at(-1);
+console.log(`${candles.length} ${timeframe} candles for ${symbol}; last close ${last.close} at ${new Date(last.time * 1000).toISOString()}`);
+
+// Every 4-hour bar of the last 7 days (history is loaded as deep as needed).
+const week = await getCandles({ symbol, timeframe: '240', from: new Date(Date.now() - 7 * 86_400_000) });
+console.log(`${week.length} 4h candles since ${new Date(week[0].time * 1000).toISOString()}`);
+```
+
+Pass a different symbol or timeframe on the command line:
+
+```bash
+node examples/candles.js NASDAQ:AAPL 60
+```
+
+## Strategy Report Example
+
+`examples/strategy-report.js` demonstrates fetching a public Pine strategy's performance data and trade records. It uses `getIndicatorData` with a strategy indicator ID and prints the summarized results. This example requires credentials because Pine scripts need an authenticated session.
+
+```javascript
+// Run: npm run build && node --env-file=.env examples/strategy-report.js
+// Computes a public Pine strategy; does not place orders or export the TradingView UI.
+import { getIndicatorData, summarizeStrategyReport } from '@mathieuc/tradingview';
+
+if (!process.env.SESSION || !process.env.SIGNATURE) {
+  console.error('Set SESSION and SIGNATURE in your environment (see .env.sample).');
+  process.exitCode = 1;
+} else {
+  try {
+    const { strategyReport } = await getIndicatorData({
+      symbol: 'BINANCE:BTCEUR',
+      timeframe: '60',
+      count: 300,
+      indicator: 'STD;Supertrend%Strategy',
+      inputs: { commission_type: 'percent', default_qty_value: 20 },
+      credentials: { session: process.env.SESSION, signature: process.env.SIGNATURE },
+      timeoutMs: 30_000,
+      signal: AbortSignal.timeout(45_000),
+    });
+    if (!strategyReport.performance.all) throw new Error('No strategy performance received');
+    // Missing aggregates remain undefined, not zero. totalPnL requires both components.
+    console.log('Summary:', summarizeStrategyReport(strategyReport));
+    // Most recent first. An exit valuation alone does NOT prove that a trade is closed.
+    console.log('Latest trade records:', strategyReport.trades.slice(0, 5));
+    console.log('Available history:', Object.keys(strategyReport.history));
+  } catch (error) {
+    console.error(error.code ?? 'STRATEGY_ERROR', error.message);
+    process.exitCode = 1;
+  }
+}
+```
+
+<Tip>
+  Running examples with **Bun** skips the `--env-file` flag entirely. Bun automatically loads `.env` from the working directory, so `bun examples/strategy-report.js` just works once `.env` is in place.
+</Tip>

@@ -1,0 +1,160 @@
+---
+title: "QuoteSession: Subscribe to Live Symbol Quotes"
+sidebarTitle: "Quotes"
+description: "QuoteSession multiplexes live quote subscriptions over a single TradingViewClient connection. Subscribe to multiple symbols and receive real-time price, bid, ask, and volume updates."
+---
+
+A `QuoteSession` lets you subscribe to live quote data for multiple symbols over a single `TradingViewClient` connection. Unlike `ChartSession`, quote sessions do not load OHLCV bars — they stream the latest snapshot fields (price, bid, ask, volume, etc.) as they change. Create one by calling `client.createQuoteSession()`.
+
+```typescript
+import { TradingViewClient } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient();
+const quotes = client.createQuoteSession({ fields: ['lp', 'bid', 'ask', 'volume'] });
+
+const btc = quotes.subscribe('BINANCE:BTCEUR');
+btc.on('loaded', () => console.log('Initial snapshot ready', btc.data));
+btc.on('data', (quote, changes) => console.log('Price:', quote.lp, 'Changes:', Object.keys(changes)));
+btc.on('error', (err) => console.error(err.message));
+
+setTimeout(async () => {
+  btc.close();
+  quotes.delete();
+  await client.close();
+}, 30_000);
+```
+
+## QuoteSession Options
+
+<ParamField body="fields" type="'all' | 'price' | QuoteField[]" default="'all'">
+  Which quote fields to request from the server.
+
+  - `'all'` — every known field (default). See [Quote Fields](#quote-fields) for the full list.
+  - `'price'` — only `lp` (last price).
+  - An array of field names — e.g. `['lp', 'bid', 'ask', 'volume', 'ch', 'chp']`.
+
+  Requesting fewer fields reduces bandwidth. Fields not in this list will not appear in `quote.data` even if TradingView sends them.
+</ParamField>
+
+## QuoteSession Methods
+
+| Method | Description |
+|---|---|
+| `subscribe(symbol, options?)` | Creates a `QuoteSubscription` for the given symbol. Returns immediately; live data arrives via events. |
+| `setFields(fields)` | Changes the requested fields for the session. All existing subscriptions switch to the new field set. |
+| `delete()` | Removes the session and all its subscriptions. Sends `quote_delete_session` to the server. Idempotent. |
+
+### subscribe(symbol, options?)
+
+<ParamField path="symbol" type="string" required>
+  Exchange-qualified symbol such as `BINANCE:BTCEUR` or `NASDAQ:AAPL`.
+</ParamField>
+
+<ParamField body="session" type="'regular' | 'extended'" default="'regular'">
+  Trading session to subscribe to. `'extended'` includes pre-market and after-hours quotes.
+</ParamField>
+
+Multiple subscriptions to the same `symbol` + `session` combination share a single server-side subscription. When the last subscription for a symbol closes, `quote_remove_symbols` is sent automatically to stop the server from streaming that symbol.
+
+## Quote Subscription
+
+`subscribe()` returns a `QuoteSubscription` instance which is an event emitter.
+
+| Member | Type | Description |
+|---|---|---|
+| `data` | `QuoteData` | Latest merged snapshot. Returns a shallow copy each time. |
+| `symbol` | `string` | The symbol this subscription is for. |
+| `session` | `string` | The trading session. |
+| `isLoaded` | `boolean` | `true` after the initial snapshot has been received. |
+| `isClosed` | `boolean` | `true` after `close()`. |
+| `close()` | `void` | Stops this subscription. If it was the last subscriber for the symbol, removes the symbol from the server. Idempotent. |
+
+### Subscription Events
+
+| Event | Arguments | Description |
+|---|---|---|
+| `loaded` | — | The initial snapshot for this symbol has been received. `subscription.data` is now populated. |
+| `data` | `quote: QuoteData, changes: QuoteData` | New quote values arrived. `quote` is the full merged snapshot; `changes` contains only the fields that changed in this update. |
+| `error` | `error: TradingViewError` | A `QUOTE_ERROR` from the server for this symbol. |
+
+## Quote Fields
+
+The following fields are included in the `'all'` preset. Pass a subset as an array to reduce bandwidth.
+
+| Field | Type | Description |
+|---|---|---|
+| `lp` | `number` | Last price. |
+| `lp_time` | `number` | Unix timestamp (seconds) of the last price. |
+| `ch` | `number` | Price change since previous close. |
+| `chp` | `number` | Percentage change since previous close. |
+| `bid` | `number` | Current best bid price. |
+| `ask` | `number` | Current best ask price. |
+| `volume` | `number` | Traded volume for the current session. |
+| `open_price` | `number` | Session open price. |
+| `high_price` | `number` | Session high price. |
+| `low_price` | `number` | Session low price. |
+| `prev_close_price` | `number` | Previous session's close price. |
+| `description` | `string` | Full instrument description. |
+| `short_name` | `string` | Short ticker symbol. |
+| `exchange` | `string` | Exchange name. |
+| `currency_code` | `string` | Currency code, e.g. `USD`. |
+| `type` | `string` | Instrument type (e.g. `crypto`, `stock`). |
+| `rtc` | `number` | Extended hours price. |
+| `rtc_time` | `number` | Unix timestamp of the extended hours price. |
+| `rch` | `number` | Extended hours change. |
+| `rchp` | `number` | Extended hours change percentage. |
+| `market_cap_basic` | `number` | Market capitalisation. |
+| `sector` | `string` | Sector classification. |
+| `industry` | `string` | Industry classification. |
+
+Any field name string is accepted by the type system, so you can request undocumented fields too.
+
+## Full Example
+
+```typescript
+import { TradingViewClient } from '@mathieuc/tradingview';
+
+const client = new TradingViewClient();
+
+// Request only the fields we need
+const quotes = client.createQuoteSession({
+  fields: ['lp', 'ch', 'chp', 'bid', 'ask', 'volume'],
+});
+
+const symbols = ['BINANCE:BTCEUR', 'BINANCE:ETHEUR', 'NASDAQ:AAPL'];
+const subscriptions = symbols.map((symbol) => {
+  const sub = quotes.subscribe(symbol);
+
+  sub.on('loaded', () => {
+    console.log(`[${symbol}] Snapshot loaded: ${sub.data.lp}`);
+  });
+
+  sub.on('data', (quote, changes) => {
+    const changedFields = Object.keys(changes);
+    if (changedFields.includes('lp')) {
+      console.log(`[${symbol}] Price: ${quote.lp} (${quote.chp?.toFixed(2)}%)`);
+    }
+  });
+
+  sub.on('error', (err) => console.error(`[${symbol}] Error:`, err.message));
+
+  return sub;
+});
+
+// Switch to all fields after 10 seconds
+setTimeout(() => {
+  console.log('Switching to all fields...');
+  quotes.setFields('all');
+}, 10_000);
+
+// Clean up after 30 seconds
+setTimeout(async () => {
+  for (const sub of subscriptions) sub.close();
+  quotes.delete();
+  await client.close();
+}, 30_000);
+```
+
+<Note>
+  For simpler one-shot or watched quote access without managing sessions manually, see the [Data API Quotes](/data-api/quotes) page which provides `getQuote` and `watchQuotes` helpers built on top of this session API.
+</Note>

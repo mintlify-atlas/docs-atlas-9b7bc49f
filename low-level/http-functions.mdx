@@ -1,0 +1,251 @@
+---
+title: "HTTP Functions: Account, Layouts, Indicators, and Pine Permissions"
+sidebarTitle: "HTTP Functions"
+description: "Low-level HTTP helpers for account management, layout drawings, Pine indicator fetching, and managing invite-only script permissions in TradingView-API."
+---
+
+The library exports a collection of HTTP helper functions that call TradingView REST and `pine-facade` endpoints directly. All functions accept a common options bag containing `{ fetch?, signal?, headers? }`, where `fetch` is a drop-in `fetch` replacement (useful for proxies or testing) and `signal` is an `AbortSignal`. Functions that access account data also accept `credentials: { session, signature }`.
+
+```typescript
+import {
+  loginUser, getUser, getDrawings, getIndicator,
+  getPrivateIndicators, PinePermissionManager,
+} from '@mathieuc/tradingview';
+```
+
+## Account Functions
+
+### loginUser(options)
+
+Signs in with a TradingView username/email and password. Returns a `User` object that includes the `session` and `signature` cookie values, plus the WebSocket `authToken`.
+
+```typescript
+import { loginUser } from '@mathieuc/tradingview';
+
+const user = await loginUser({
+  username: 'myusername',
+  password: 'mypassword',
+  remember: true,       // keep the session alive longer (default: true)
+  userAgent: 'MyBot/1', // custom user-agent prefix (optional)
+});
+
+console.log(user.authToken);  // websocket auth token
+console.log(user.session);    // sessionid cookie
+console.log(user.signature);  // sessionid_sign cookie
+```
+
+<Warning>
+  `loginUser` does not support accounts protected by 2FA or CAPTCHA challenges. If your account has 2FA enabled, log in through a browser, extract the `sessionid` and `sessionid_sign` cookies, and pass them as `credentials` instead.
+</Warning>
+
+### getUser(credentials, options?)
+
+Loads the account object behind existing session cookies. Follows regional redirects (e.g. `fr.tradingview.com`) and stops redirect loops.
+
+```typescript
+import { getUser } from '@mathieuc/tradingview';
+
+const credentials = {
+  session: process.env.SESSION!,
+  signature: process.env.SIGNATURE!,
+};
+
+const user = await getUser(credentials, {
+  location: 'https://fr.tradingview.com/', // optional: regional subdomain
+  maxRedirects: 5,                          // optional: default 5
+});
+
+console.log(user.id, user.username, user.authToken);
+```
+
+## Layout and Drawing Functions
+
+### getChartToken(layoutId, options?)
+
+Fetches a chart-storage JWT for a specific layout. The `layoutId` is the alphanumeric ID in `tradingview.com/chart/<ID>/`. Used internally by `getDrawings`.
+
+```typescript
+const token = await getChartToken('AbCd1234', {
+  credentials,
+  userId: user.id, // required for private layouts
+});
+```
+
+### getDrawings(layoutId, options?)
+
+Returns all drawings saved in a TradingView layout. Public layouts can be fetched without credentials; private layouts require credentials and a `userId`.
+
+```typescript
+import { getDrawings } from '@mathieuc/tradingview';
+
+const drawings = await getDrawings('AbCd1234', {
+  credentials, // optional for public layouts
+  userId: user.id,
+  symbol: 'BINANCE:BTCEUR', // only return drawings for this symbol (optional)
+  chartId: '_shared',        // chart pane within the layout (default: '_shared')
+});
+
+for (const d of drawings) {
+  console.log(d.type, d.symbol, d.points, d.state?.text);
+}
+```
+
+Each returned `Drawing` object has `id`, `symbol`, `type`, `points` (array of `{ time_t, price, offset }`), `zorder`, `linkKey`, and all `state` fields merged at the top level.
+
+## Indicator Functions
+
+### getIndicator(id, options?)
+
+Loads a Pine indicator definition for use with `chart.createStudy()`. See also [Studies](/low-level/studies).
+
+```typescript
+import { getIndicator } from '@mathieuc/tradingview';
+
+// Built-in Pine script
+const rsi = await getIndicator('STD;RSI');
+
+// Specific version of a community script
+const pub = await getIndicator('PUB;xxxx', { version: '3', credentials });
+
+// Private or invite-only script
+const priv = await getIndicator('USER;xxxx', { credentials });
+```
+
+### getPrivateIndicators(credentials, options?)
+
+Lists all Pine scripts saved in your account ("My scripts" in the TradingView editor).
+
+```typescript
+import { getPrivateIndicators } from '@mathieuc/tradingview';
+
+const scripts = await getPrivateIndicators(credentials);
+for (const s of scripts) {
+  console.log(s.id, s.name, s.version, s.type);
+}
+// Load one: await getIndicator(scripts[0].id, { credentials })
+```
+
+### searchIndicators(query, options?)
+
+Searches built-in (cached in memory) and community indicators. Call `clearIndicatorCache()` to force a fresh fetch of the built-in list.
+
+```typescript
+import { searchIndicators, clearIndicatorCache } from '@mathieuc/tradingview';
+
+const results = await searchIndicators('RSI');
+// results: Array<{ id, version, name, author, type, access }>
+
+clearIndicatorCache(); // invalidate the in-process cache
+```
+
+### parseIndicatorDefinition(result, id, version)
+
+Converts a raw `pine-facade/translate` JSON response into a `PineIndicator`. Use this to avoid re-fetching an indicator definition you have already cached to disk.
+
+```typescript
+import { parseIndicatorDefinition } from '@mathieuc/tradingview';
+
+// `raw` is the JSON body from pine-facade/translate/<id>/<version>
+const indicator = parseIndicatorDefinition(raw.result, 'STD;RSI', 'last');
+```
+
+## Search and Analysis Functions
+
+| Function | Description |
+|---|---|
+| `searchMarkets(text, options?)` | Symbol search via the v3 endpoint. Options: `type`, `exchange`, `country`, `sector`, `offset`. |
+| `searchIndicators(query, options?)` | Searches built-in (memory-cached) and community indicators. |
+| `getTechnicalAnalysis(symbol)` | Technical ratings for 1m to 1M periods. Returns `null` if unavailable. |
+
+These functions are also covered in [Data API: Search](/data-api/search).
+
+## PinePermissionManager
+
+Manages access to invite-only Pine scripts that you own. Requires your credentials and the Pine script ID (starting with `PUB;`).
+
+```typescript
+import { PinePermissionManager } from '@mathieuc/tradingview';
+
+const manager = new PinePermissionManager('PUB;AbCd1234', {
+  credentials: {
+    session: process.env.SESSION!,
+    signature: process.env.SIGNATURE!,
+  },
+});
+```
+
+**Constructor parameters:**
+
+<ParamField path="pineId" type="string" required>
+  The Pine script ID, typically starting with `PUB;`.
+</ParamField>
+
+<ParamField body="credentials" type="{ session: string; signature: string }" required>
+  Both the `session` and `signature` cookies are required to manage permissions.
+</ParamField>
+
+**Methods:**
+
+| Method | Returns | Description |
+|---|---|---|
+| `getUsers(limit?, order?)` | `Promise<AuthorizedUser[]>` | Lists users who have access. `limit` defaults to 10. `order` can be `'user__username'`, `'-created'`, `'expiration,user__username'`, etc. |
+| `addUser(username, expiration?)` | `Promise<'ok' \| 'exists'>` | Grants access to a user. Pass an `expiration` `Date` for time-limited access. Returns `'exists'` if already granted. |
+| `modifyExpiration(username, expiration?)` | `Promise<'ok'>` | Updates or removes (`undefined`) the expiration date for a user. |
+| `removeUser(username)` | `Promise<'ok'>` | Revokes access for a user. |
+
+**Full example:**
+
+```typescript
+import { PinePermissionManager } from '@mathieuc/tradingview';
+
+const manager = new PinePermissionManager('PUB;AbCd1234', { credentials });
+
+// List current users
+const users = await manager.getUsers(20, '-created');
+console.log('Authorized users:', users.map((u) => u.username));
+
+// Grant access
+const result = await manager.addUser('new_trader'); // 'ok' or 'exists'
+
+// Grant access with expiry (30 days from now)
+await manager.addUser('trial_user', new Date(Date.now() + 30 * 86_400_000));
+
+// Extend expiry
+await manager.modifyExpiration('trial_user', new Date(Date.now() + 60 * 86_400_000));
+
+// Remove expiry (make permanent)
+await manager.modifyExpiration('trial_user');
+
+// Revoke access
+await manager.removeUser('trial_user');
+```
+
+## Drawings Example
+
+```typescript
+import { getDrawings, loginUser } from '@mathieuc/tradingview';
+
+// Log in once to get credentials
+const user = await loginUser({
+  username: process.env.TV_USERNAME!,
+  password: process.env.TV_PASSWORD!,
+});
+
+// Fetch drawings from a private layout
+const drawings = await getDrawings('MyLayout123', {
+  credentials: { session: user.session, signature: user.signature },
+  userId: user.id,
+  symbol: 'NASDAQ:AAPL',
+});
+
+for (const d of drawings) {
+  console.log(`${d.type} on ${d.symbol}:`);
+  for (const pt of d.points) {
+    console.log(`  ${new Date(pt.time_t * 1000).toISOString()} @ ${pt.price}`);
+  }
+}
+```
+
+<Note>
+  See the [Authentication](/authentication) page for guidance on obtaining and storing `session` and `signature` cookies securely.
+</Note>

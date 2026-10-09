@@ -1,0 +1,63 @@
+---
+title: "TradingView-API: Community Market Data Library"
+sidebarTitle: "Introduction"
+description: "TradingView-API is a community TypeScript library for candles, quotes, indicators and strategies over TradingView's WebSocket and HTTP endpoints."
+---
+
+TradingView-API (`@mathieuc/tradingview`) is an independent, community-built TypeScript/JavaScript library that lets you fetch OHLCV candles, live quotes, indicator values, strategy reports, and screener results directly from TradingView's WebSocket and HTTP endpoints. It is **not** an official TradingView product and is not affiliated with or endorsed by TradingView in any way — it is maintained by the community for developers who want programmatic access to market data.
+
+## Two entry points
+
+The library ships two complementary entry points to suit different use cases:
+
+| Entry point | Use it when… |
+| --- | --- |
+| `@mathieuc/tradingview/data` | You want a **high-level API** that manages connections, timeouts, and cleanup for you. Functions like `getCandles` or `watchCandles` open what they need, resolve with complete data, and release every resource — including on errors or cancellation. Start here. |
+| `@mathieuc/tradingview` | You need **full low-level control**: multiple charts on one connection, replay mode, raw WebSocket packets, custom transports. Also re-exports everything from the data entry point. |
+
+## Key features
+
+<CardGroup cols={2}>
+  <Card title="Data API" icon="database" href="/data-api/overview">
+    One-shot functions and live watchers for candles, quotes, indicators, and screener results. Connections, sessions, and cleanup are handled automatically.
+  </Card>
+  <Card title="Low-Level Client" icon="plug" href="/low-level/client">
+    Direct control over `TradingViewClient`, chart sessions, replay mode, and raw WebSocket packets for advanced use cases.
+  </Card>
+  <Card title="Indicators & Strategies" icon="chart-line" href="/data-api/indicators">
+    Run built-in Pine studies, community indicators, and full Pine strategies. Access plot values, drawings, and complete strategy reports including trade records.
+  </Card>
+  <Card title="Screener" icon="filter" href="/data-api/screener">
+    Query TradingView's stock and crypto screener with custom columns, filters, and sorting — no chart session required.
+  </Card>
+</CardGroup>
+
+## Package info
+
+| Property | Value |
+| --- | --- |
+| **npm package** | `@mathieuc/tradingview` |
+| **Version** | 4 (v4 is the default `npm install` target; v3 remains at `@mathieuc/tradingview@3`) |
+| **Runtime requirement** | Node.js ≥ 20 or Bun |
+| **Module format** | ESM-only package. CommonJS `require()` works on Node.js ≥ 20.19 / 22.12+ or via `await import()` |
+| **License** | ISC |
+
+## What requires an account?
+
+Most read-only market data works without any TradingView account. Some features require you to pass your `sessionid` and `sessionid_sign` session cookies as `credentials`. See [Authentication](/authentication) for how to obtain and use them.
+
+| Feature | Anonymous | Requires account |
+| --- | --- | --- |
+| OHLCV candles (daily, weekly, monthly) | ✅ Full history | — |
+| Intraday candles (1 min, 5 min…) | ✅ ~7 000 bars | ✅ Extended history |
+| Built-in studies (Volume, RSI via study type) | ✅ | — |
+| Quotes (last price, change, bid/ask) | ✅ | — |
+| Screener & hotlists | ✅ | — |
+| Pine script indicators (`STD;`, `PUB;`, `USER;`) | ❌ | ✅ |
+| Private indicators (`USER;`) | ❌ | ✅ |
+| Extended / pre-market quote sessions | ❌ | ✅ |
+| Account watchlists | ❌ | ✅ |
+
+<Note>
+  This is an independent community project. It is **not** affiliated with, endorsed by, or supported by TradingView. "TradingView" is a trademark of its respective owner. Always check your data provider's terms of service and applicable market-data permissions for your use case.
+</Note>

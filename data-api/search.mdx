@@ -1,0 +1,304 @@
+---
+title: "Search Markets, Indicators, and Get Technical Analysis Ratings"
+sidebarTitle: "Search"
+description: "Use searchMarkets, searchIndicators, and getTechnicalAnalysis to find symbols, discover Pine indicators, and retrieve multi-timeframe technical analysis ratings."
+---
+
+Three HTTP helper functions make it easy to discover symbols, find indicator IDs, and check technical ratings — all without opening a WebSocket connection. `searchMarkets` finds exchange-qualified symbols for use across the Data API. `searchIndicators` returns IDs for built-in and community Pine indicators. `getTechnicalAnalysis` returns TradingView's multi-timeframe oscillator and moving-average ratings for any symbol.
+
+```typescript
+import { searchMarkets, searchIndicators, getTechnicalAnalysis } from '@mathieuc/tradingview/data';
+// or
+import { searchMarkets, searchIndicators, getTechnicalAnalysis } from '@mathieuc/tradingview';
+```
+
+---
+
+## searchMarkets
+
+Searches TradingView's symbol database by keyword, exchange prefix, or full exchange-qualified symbol. Returns an array of matching market results.
+
+```typescript
+import { searchMarkets } from '@mathieuc/tradingview/data';
+
+const markets = await searchMarkets('BINANCE:BTC', { type: 'crypto' });
+console.log(markets.slice(0, 5).map((m) => `${m.id} (${m.description})`));
+// BINANCE:BTCUSDT (Bitcoin / TetherUS)
+// BINANCE:BTCEUR  (Bitcoin / Euro)
+// ...
+```
+
+### Parameters
+
+<ParamField query="text" type="string" required>
+  Search text. Use `'EXCHANGE:SYMBOL'` format to search within a specific exchange (e.g. `'BINANCE:BTC'`), or a plain keyword like `'Apple'`.
+</ParamField>
+
+<ParamField query="options.type" type="string">
+  Filter by market type. Accepted values: `'stock'`, `'crypto'`, `'forex'`, `'futures'`, `'index'`, `'cfd'`, `'economic'`, `'bond'`, `'fund'`, `'common_stock'`.
+</ParamField>
+
+<ParamField query="options.exchange" type="string">
+  Filter by exchange name (e.g. `'BINANCE'`, `'NASDAQ'`, `'NYSE'`). When the `text` argument contains an `EXCHANGE:` prefix, the exchange is extracted automatically.
+</ParamField>
+
+<ParamField query="options.offset" type="number">
+  Pagination offset. Pass the number of results already received to fetch the next page.
+</ParamField>
+
+<ParamField query="options.country" type="string">
+  Filter by ISO country code, e.g. `'US'`, `'DE'`, `'JP'`.
+</ParamField>
+
+<ParamField query="options.sector" type="string">
+  Filter by sector, e.g. `'Finance'`, `'Technology'`, `'Health Technology'`.
+</ParamField>
+
+### Return type: MarketSearchResult[]
+
+<ResponseField name="id" type="string">
+  Exchange-qualified symbol, ready to use in `getCandles`, `getQuote`, `getIndicatorData`, etc. Example: `'BINANCE:BTCUSDT'`, `'NASDAQ:AAPL'`.
+</ResponseField>
+
+<ResponseField name="exchange" type="string">
+  Short exchange name, e.g. `'BINANCE'`, `'NASDAQ'`.
+</ResponseField>
+
+<ResponseField name="fullExchange" type="string">
+  Exchange name as returned by TradingView (may include extra text).
+</ResponseField>
+
+<ResponseField name="symbol" type="string">
+  Ticker symbol without the exchange prefix, e.g. `'BTCUSDT'`, `'AAPL'`.
+</ResponseField>
+
+<ResponseField name="description" type="string">
+  Human-readable description, e.g. `'Bitcoin / TetherUS'`, `'Apple Inc'`.
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  Market type returned by TradingView, e.g. `'crypto'`, `'stock'`, `'forex'`.
+</ResponseField>
+
+<ResponseField name="currency" type="string | undefined">
+  Quote currency code, e.g. `'USD'`, `'EUR'`.
+</ResponseField>
+
+<ResponseField name="country" type="string | undefined">
+  Country code for stocks, e.g. `'US'`.
+</ResponseField>
+
+### Code examples
+
+<CodeGroup>
+
+```typescript Search crypto
+import { searchMarkets } from '@mathieuc/tradingview/data';
+
+const results = await searchMarkets('BTC', { type: 'crypto' });
+for (const market of results.slice(0, 5)) {
+  console.log(`${market.id} — ${market.description} [${market.currency}]`);
+}
+```
+
+```typescript Filter by exchange and type
+import { searchMarkets } from '@mathieuc/tradingview/data';
+
+// Find all NASDAQ stocks matching 'Apple'
+const stocks = await searchMarkets('Apple', {
+  type: 'stock',
+  exchange: 'NASDAQ',
+  country: 'US',
+});
+console.log(stocks.map((s) => s.id));
+```
+
+```typescript Filter by sector
+import { searchMarkets } from '@mathieuc/tradingview/data';
+
+const financeStocks = await searchMarkets('JPMorgan', {
+  type: 'stock',
+  sector: 'Finance',
+  country: 'US',
+});
+console.log(financeStocks[0]?.id); // NYSE:JPM
+```
+
+```typescript Paginate results
+import { searchMarkets } from '@mathieuc/tradingview/data';
+
+const firstPage = await searchMarkets('ETH', { type: 'crypto' });
+const secondPage = await searchMarkets('ETH', { type: 'crypto', offset: firstPage.length });
+const all = [...firstPage, ...secondPage];
+console.log(`Found ${all.length} ETH markets`);
+```
+
+</CodeGroup>
+
+---
+
+## searchIndicators
+
+Searches TradingView's indicator library, returning both built-in Pine studies and published community indicators. Use the returned `id` and `version` with `getIndicatorData`.
+
+```typescript
+import { searchIndicators } from '@mathieuc/tradingview/data';
+
+const results = await searchIndicators('RSI');
+for (const indicator of results.slice(0, 5)) {
+  console.log(`${indicator.id} — ${indicator.name} [${indicator.access}]`);
+}
+// STD;RSI — Relative Strength Index [open]
+// STD;Stochastic_RSI — Stochastic RSI [open]
+// PUB;xxxx — Custom RSI Divergence [open]
+```
+
+### Return type: IndicatorSearchResult[]
+
+<ResponseField name="id" type="string">
+  Script ID to pass to `getIndicatorData`. Format: `'STD;RSI'` (built-in), `'PUB;xxxx'` (published community), `'USER;xxxx'` (private).
+</ResponseField>
+
+<ResponseField name="version" type="string">
+  Version string. Pass to `getIndicatorData` as `version` to pin a specific release.
+</ResponseField>
+
+<ResponseField name="name" type="string">
+  Display name of the indicator.
+</ResponseField>
+
+<ResponseField name="author" type="string">
+  Author username.
+</ResponseField>
+
+<ResponseField name="image" type="string">
+  URL of the indicator's preview image.
+</ResponseField>
+
+<ResponseField name="source" type="string">
+  Source type (`'Script@tv-scripting-101!'` for Pine scripts, etc.).
+</ResponseField>
+
+<ResponseField name="type" type="string">
+  Indicator category, e.g. `'study'` or `'strategy'`.
+</ResponseField>
+
+<ResponseField name="access" type="string">
+  Access level: `'open'` (free), `'closed'` (invite-only), or `'paid'`.
+</ResponseField>
+
+### Using search results with getIndicatorData
+
+```typescript
+import { searchIndicators, getIndicatorData } from '@mathieuc/tradingview/data';
+
+// Find the built-in RSI indicator
+const [rsiResult] = await searchIndicators('Relative Strength Index');
+console.log('Found:', rsiResult.id, rsiResult.version);
+
+// Use the found ID
+const data = await getIndicatorData({
+  symbol: 'BINANCE:BTCUSDT',
+  timeframe: '60',
+  indicator: rsiResult.id,
+  version: rsiResult.version,
+  inputs: { Length: 14 },
+  credentials: {
+    session: process.env.TV_SESSION!,
+    signature: process.env.TV_SIGNATURE!,
+  },
+});
+
+console.log('RSI values (last 3):', data.values.slice(-3));
+```
+
+<Note>
+  Built-in indicator metadata is cached. If built-in indicators seem stale after a TradingView update, call `clearIndicatorCache()` to clear the local cache and force a refresh on the next request.
+</Note>
+
+---
+
+## getTechnicalAnalysis
+
+Fetches TradingView's multi-timeframe technical analysis ratings for a symbol. Returns an object keyed by period, or `null` when the scanner has no data for that symbol.
+
+```typescript
+import { getTechnicalAnalysis } from '@mathieuc/tradingview/data';
+
+const ratings = await getTechnicalAnalysis('BINANCE:BTCUSDT');
+if (ratings) {
+  console.log('Daily rating:', ratings['1D']);
+  // { All: 1.6, MA: 2.0, Other: 1.2 }
+  console.log('1-minute rating:', ratings['1']);
+}
+```
+
+### Parameter
+
+<ParamField query="symbol" type="string" required>
+  Exchange-qualified symbol, e.g. `'BINANCE:BTCUSDT'` or `'NASDAQ:AAPL'`.
+</ParamField>
+
+### Return type: TechnicalAnalysis | null
+
+Returns `null` when the scanner has no data for the symbol. Otherwise returns an object keyed by time period:
+
+| Period key | Timeframe |
+|---|---|
+| `'1'` | 1 minute |
+| `'5'` | 5 minutes |
+| `'15'` | 15 minutes |
+| `'60'` | 1 hour |
+| `'240'` | 4 hours |
+| `'1D'` | Daily |
+| `'1W'` | Weekly |
+| `'1M'` | Monthly |
+
+Each period contains a `TechnicalRating` object:
+
+<ResponseField name="All" type="number">
+  Summary rating combining moving averages and oscillators. Range: `-2` (strong sell) to `+2` (strong buy).
+</ResponseField>
+
+<ResponseField name="MA" type="number">
+  Moving averages rating only. Range: `-2` to `+2`.
+</ResponseField>
+
+<ResponseField name="Other" type="number">
+  Oscillators rating only. Range: `-2` to `+2`.
+</ResponseField>
+
+### Rating scale
+
+| Value | Signal |
+|---|---|
+| `+2` | Strong Buy |
+| `+1` | Buy |
+| `0` | Neutral |
+| `-1` | Sell |
+| `-2` | Strong Sell |
+
+Values are scaled from the raw scanner range `[-1, 1]` by `round(raw * 1000) / 500`, mapping to `[-2, 2]`.
+
+### Code example
+
+```typescript
+import { searchMarkets, getTechnicalAnalysis } from '@mathieuc/tradingview/data';
+
+// Find a symbol then get its ratings
+const [market] = await searchMarkets('BINANCE:BTC', { type: 'crypto' });
+console.log('Checking ratings for:', market.id);
+
+const ratings = await getTechnicalAnalysis(market.id);
+
+if (!ratings) {
+  console.log('No scanner data available for this symbol.');
+} else {
+  for (const [period, rating] of Object.entries(ratings)) {
+    const signal = rating.All >= 1 ? '▲ Buy'
+      : rating.All <= -1 ? '▼ Sell'
+      : '— Neutral';
+    console.log(`${period.padEnd(4)} All=${rating.All.toFixed(2)} MA=${rating.MA.toFixed(2)} Other=${rating.Other.toFixed(2)} → ${signal}`);
+  }
+}
+```
